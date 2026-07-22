@@ -1,0 +1,6 @@
+.aider*
+.local
+.venv
+.vscode
+
+build/
