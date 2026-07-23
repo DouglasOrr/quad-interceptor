@@ -6,6 +6,10 @@
 examples/<DD>-<name> -- standalone examples/demos
 ```
 
+## Instructions
+
+- Leave git commands to me, except e.g. when reviewing diffs.
+
 ## Style
 
 - C++20, -Wall -Wextra -Werror, clang-format
