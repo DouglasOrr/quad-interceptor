@@ -1,5 +1,8 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <iostream>
 
 // OpenGL Function Pointer Types
@@ -42,6 +45,8 @@ typedef void(APIENTRY* PFN_glDeleteShader)(GLuint shader);
 typedef void(APIENTRY* PFN_glDeleteProgram)(GLuint program);
 typedef void(APIENTRY* PFN_glDeleteBuffers)(GLsizei n, const GLuint* buffers);
 typedef void(APIENTRY* PFN_glDeleteVertexArrays)(GLsizei n, const GLuint* arrays);
+typedef GLint(APIENTRY* PFN_glGetUniformLocation)(GLuint program, const GLchar* name);
+typedef void(APIENTRY* PFN_glUniform2f)(GLint location, GLfloat v0, GLfloat v1);
 
 // Function Pointer Instances
 PFN_glCreateShader glCreateShader = nullptr;
@@ -66,6 +71,8 @@ PFN_glDeleteShader glDeleteShader = nullptr;
 PFN_glDeleteProgram glDeleteProgram = nullptr;
 PFN_glDeleteBuffers glDeleteBuffers = nullptr;
 PFN_glDeleteVertexArrays glDeleteVertexArrays = nullptr;
+PFN_glGetUniformLocation glGetUniformLocation = nullptr;
+PFN_glUniform2f glUniform2f = nullptr;
 
 // Helper to load modern OpenGL functions dynamically via SDL
 bool loadGLFunctions() {
@@ -98,6 +105,8 @@ bool loadGLFunctions() {
     LOAD_PROC(PFN_glDeleteProgram, glDeleteProgram);
     LOAD_PROC(PFN_glDeleteBuffers, glDeleteBuffers);
     LOAD_PROC(PFN_glDeleteVertexArrays, glDeleteVertexArrays);
+    LOAD_PROC(PFN_glGetUniformLocation, glGetUniformLocation);
+    LOAD_PROC(PFN_glUniform2f, glUniform2f);
 
 #undef LOAD_PROC
     return true;
@@ -109,8 +118,9 @@ const char* vertexShaderSource = R"glsl(
     layout (location = 0) in vec3 aPos;
     layout (location = 1) in vec3 aColor;
     out vec3 ourColor;
+    uniform vec2 uCameraPos;
     void main() {
-        gl_Position = vec4(aPos, 1.0);
+        gl_Position = vec4(aPos.x - uCameraPos.x, aPos.y - uCameraPos.y, aPos.z, 1.0);
         ourColor = aColor;
     }
 )glsl";
@@ -148,12 +158,93 @@ bool checkProgramLink(GLuint program) {
     return true;
 }
 
+// Procedural Square Wave Synth State
+struct SynthState {
+    float phase = 0.0f;
+    float currentFreq = 440.0f;
+    int noteSamplesRemaining = 0;
+    int noteDurationSamples = 44100 / 6;
+    int sampleRate = 44100;
+    uint32_t rngState = 12345;
+
+    uint32_t nextRandom() {
+        rngState = rngState * 1664525u + 1013904223u;
+        return rngState;
+    }
+};
+
+void audioCallback(void* userdata, Uint8* stream, int len) {
+    SynthState* synth = static_cast<SynthState*>(userdata);
+    float* buffer = reinterpret_cast<float*>(stream);
+    int sampleCount = len / static_cast<int>(sizeof(float));
+
+    // C Major Pentatonic Scale
+    const float pentatonic[] = {261.63f, 293.66f, 329.63f, 392.00f, 440.00f,
+                                523.25f, 587.33f, 659.25f, 783.99f, 880.00f};
+    constexpr int numNotes = sizeof(pentatonic) / sizeof(pentatonic[0]);
+
+    for (int i = 0; i < sampleCount; ++i) {
+        if (synth->noteSamplesRemaining <= 0) {
+            synth->currentFreq = pentatonic[synth->nextRandom() % numNotes];
+            synth->noteSamplesRemaining = synth->noteDurationSamples;
+        }
+
+        // Decay envelope
+        float env = static_cast<float>(synth->noteSamplesRemaining) /
+                    static_cast<float>(synth->noteDurationSamples);
+
+        // Square wave synthesis
+        synth->phase += synth->currentFreq / static_cast<float>(synth->sampleRate);
+        if (synth->phase >= 1.0f) synth->phase -= 1.0f;
+
+        float squareWave = (synth->phase < 0.5f) ? 0.08f : -0.08f;
+        buffer[i] = squareWave * env;
+
+        synth->noteSamplesRemaining--;
+    }
+}
+
+void openControllerOrJoystick(SDL_GameController** controller, SDL_Joystick** joystick) {
+    if (*controller || *joystick) return;
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) {
+            *controller = SDL_GameControllerOpen(i);
+            if (*controller) break;
+        } else {
+            *joystick = SDL_JoystickOpen(i);
+            if (*joystick) break;
+        }
+    }
+}
+
 int main(int, char**) {
-    // Initialize SDL Video
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    // Initialize SDL Video, Audio, Joystick, and GameController
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) <
+        0) {
         std::cerr << "Failed to initialize SDL: " << SDL_GetError() << std::endl;
         return -1;
     }
+
+    // Setup Procedural Audio Synth
+    SynthState synth;
+    SDL_AudioSpec want{}, have{};
+    want.freq = 44100;
+    want.format = AUDIO_F32SYS;
+    want.channels = 1;
+    want.samples = 512;
+    want.callback = audioCallback;
+    want.userdata = &synth;
+
+    SDL_AudioDeviceID audioDevice = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
+    if (audioDevice != 0) {
+        synth.sampleRate = have.freq > 0 ? have.freq : 44100;
+        synth.noteDurationSamples = synth.sampleRate / 6;
+        SDL_PauseAudioDevice(audioDevice, 0);
+    }
+
+    SDL_GameController* controller = nullptr;
+    SDL_Joystick* joystick = nullptr;
+    openControllerOrJoystick(&controller, &joystick);
 
     // Request OpenGL 3.3 Core Profile
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -164,11 +255,12 @@ int main(int, char**) {
 
     // Create Window
     SDL_Window* window =
-        SDL_CreateWindow("OpenGL Colored Triangle", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                         800, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+        SDL_CreateWindow("OpenGL Camera Movement & Procedural Audio", SDL_WINDOWPOS_CENTERED,
+                         SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
 
     if (!window) {
         std::cerr << "Failed to create SDL Window: " << SDL_GetError() << std::endl;
+        if (audioDevice != 0) SDL_CloseAudioDevice(audioDevice);
         SDL_Quit();
         return -1;
     }
@@ -177,6 +269,7 @@ int main(int, char**) {
     SDL_GLContext glContext = SDL_GL_CreateContext(window);
     if (!glContext) {
         std::cerr << "Failed to create OpenGL Context: " << SDL_GetError() << std::endl;
+        if (audioDevice != 0) SDL_CloseAudioDevice(audioDevice);
         SDL_DestroyWindow(window);
         SDL_Quit();
         return -1;
@@ -184,6 +277,7 @@ int main(int, char**) {
 
     // Load modern OpenGL functions
     if (!loadGLFunctions()) {
+        if (audioDevice != 0) SDL_CloseAudioDevice(audioDevice);
         SDL_GL_DeleteContext(glContext);
         SDL_DestroyWindow(window);
         SDL_Quit();
@@ -216,6 +310,8 @@ int main(int, char**) {
     glDeleteShader(vertexShader);
     glDeleteShader(fragmentShader);
 
+    GLint uCameraPosLoc = glGetUniformLocation(shaderProgram, "uCameraPos");
+
     // Triangle Vertices (Positions and Colors interleaved)
     float vertices[] = {
         // Positions         // Colors
@@ -246,10 +342,22 @@ int main(int, char**) {
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glBindVertexArray(0);
 
+    // Camera variables
+    float cameraX = 0.0f;
+    float cameraY = 0.0f;
+    const float cameraSpeed = 2.0f;
+
+    Uint64 lastTime = SDL_GetPerformanceCounter();
+
     // Main Loop
     bool running = true;
     SDL_Event event;
     while (running) {
+        Uint64 currentTime = SDL_GetPerformanceCounter();
+        float deltaTime = (float)(currentTime - lastTime) / (float)SDL_GetPerformanceFrequency();
+        lastTime = currentTime;
+        if (deltaTime > 0.1f) deltaTime = 0.1f;
+
         while (SDL_PollEvent(&event)) {
             if (event.type == SDL_QUIT) {
                 running = false;
@@ -257,8 +365,76 @@ int main(int, char**) {
                 if (event.key.keysym.sym == SDLK_ESCAPE) {
                     running = false;
                 }
+            } else if (event.type == SDL_CONTROLLERDEVICEADDED ||
+                       event.type == SDL_JOYDEVICEADDED) {
+                openControllerOrJoystick(&controller, &joystick);
+            } else if (event.type == SDL_CONTROLLERDEVICEREMOVED) {
+                if (controller &&
+                    event.cdevice.which ==
+                        SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller))) {
+                    SDL_GameControllerClose(controller);
+                    controller = nullptr;
+                    openControllerOrJoystick(&controller, &joystick);
+                }
+            } else if (event.type == SDL_JOYDEVICEREMOVED) {
+                if (joystick && event.jdevice.which == SDL_JoystickInstanceID(joystick)) {
+                    SDL_JoystickClose(joystick);
+                    joystick = nullptr;
+                    openControllerOrJoystick(&controller, &joystick);
+                }
             }
         }
+
+        // Gather movement input
+        float moveX = 0.0f;
+        float moveY = 0.0f;
+
+        // WASD Keyboard input
+        const Uint8* keyState = SDL_GetKeyboardState(nullptr);
+        if (keyState[SDL_SCANCODE_W]) moveY += 1.0f;
+        if (keyState[SDL_SCANCODE_S]) moveY -= 1.0f;
+        if (keyState[SDL_SCANCODE_A]) moveX -= 1.0f;
+        if (keyState[SDL_SCANCODE_D]) moveX += 1.0f;
+
+        // Joystick / Controller input
+        const Sint16 DEADZONE = 8000;
+        if (controller) {
+            Sint16 axisX = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTX);
+            Sint16 axisY = SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_LEFTY);
+            if (std::abs(axisX) > DEADZONE) moveX += (float)axisX / 32767.0f;
+            if (std::abs(axisY) > DEADZONE) moveY -= (float)axisY / 32767.0f;
+
+            if (SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_UP))
+                moveY += 1.0f;
+            if (SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_DOWN))
+                moveY -= 1.0f;
+            if (SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_LEFT))
+                moveX -= 1.0f;
+            if (SDL_GameControllerGetButton(controller, SDL_CONTROLLER_BUTTON_DPAD_RIGHT))
+                moveX += 1.0f;
+        } else if (joystick) {
+            Sint16 axisX = SDL_JoystickGetAxis(joystick, 0);
+            Sint16 axisY = SDL_JoystickGetAxis(joystick, 1);
+            if (std::abs(axisX) > DEADZONE) moveX += (float)axisX / 32767.0f;
+            if (std::abs(axisY) > DEADZONE) moveY -= (float)axisY / 32767.0f;
+
+            Uint8 hat = SDL_JoystickGetHat(joystick, 0);
+            if (hat & SDL_HAT_UP) moveY += 1.0f;
+            if (hat & SDL_HAT_DOWN) moveY -= 1.0f;
+            if (hat & SDL_HAT_LEFT) moveX -= 1.0f;
+            if (hat & SDL_HAT_RIGHT) moveX += 1.0f;
+        }
+
+        // Normalize movement vector if magnitude > 1
+        float len = std::sqrt(moveX * moveX + moveY * moveY);
+        if (len > 1.0f) {
+            moveX /= len;
+            moveY /= len;
+        }
+
+        // Update camera position
+        cameraX += moveX * cameraSpeed * deltaTime;
+        cameraY += moveY * cameraSpeed * deltaTime;
 
         // Render
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
@@ -266,6 +442,7 @@ int main(int, char**) {
 
         // Draw Triangle
         glUseProgram(shaderProgram);
+        glUniform2f(uCameraPosLoc, cameraX, cameraY);
         glBindVertexArray(VAO);
         glDrawArrays(GL_TRIANGLES, 0, 3);
 
@@ -274,6 +451,10 @@ int main(int, char**) {
     }
 
     // Cleanup
+    if (audioDevice != 0) SDL_CloseAudioDevice(audioDevice);
+    if (controller) SDL_GameControllerClose(controller);
+    if (joystick) SDL_JoystickClose(joystick);
+
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
     glDeleteProgram(shaderProgram);
