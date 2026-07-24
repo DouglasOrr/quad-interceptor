@@ -1,5 +1,7 @@
 .aider*
 .local
+.ninja_deps
+.ninja_log
 .venv
 .vscode
 

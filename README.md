@@ -5,5 +5,5 @@ Creating a small game that consumes < 1.44 MB on disk, so as to [fit on a floppy
 ## Requirements
 
 ```sh
-apt install libsdl2-dev clang clang-format
+apt install clang clang-format libsdl2-dev ninja-build
 ```

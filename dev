@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+
+"""development runner script"""
+
+import argparse
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any, Callable
+
+ROOT = Path(__file__).parent.resolve()
+
+
+def sh(*cmd: str) -> None:
+    cmd = tuple(str(c) for c in cmd if c is not None)
+    print("$ " + " ".join(cmd), file=sys.stderr)
+    if exit_code := subprocess.run(cmd).returncode:
+        sys.exit(exit_code)
+
+
+def cli(*args: Any, **kwargs: Any) -> Callable[[Any], Any]:
+    """Declare a CLI command / arguments for that command."""
+
+    def wrap(func: Any) -> Any:
+        if not hasattr(func, "cli_args"):
+            setattr(func, "cli_args", [])
+        if args or kwargs:
+            getattr(func, "cli_args").append((args, kwargs))
+        return func
+
+    return wrap
+
+
+# Commands
+
+CXX = "clang++"
+CXXFLAGS = "-Wall -Wextra -Werror -ffunction-sections -fdata-sections"
+LINKFLAGS = "-Wl,--gc-sections"
+CXXFLAGS_VARIANT = {
+    "debug": "-O0 -g -DDEBUG",
+    "release": "-Os -DNDEBUG",
+}
+
+
+def _generate_build_ninja(variant: str) -> str:
+    lines: list[str] = []
+
+    lines.append("rule cxx")
+    lines.append(f"  command = {CXX} $cflags -c $in -o $out")
+    lines.append("  depfile = $out.d")
+    lines.append("  deps = gcc")
+    lines.append("  description = CXX $out")
+    lines.append("")
+
+    link_cmd = f"{CXX} $in $ldflags -o $out"
+    if variant == "release":
+        link_cmd += " && strip $out"
+    lines.append("rule link")
+    lines.append(f"  command = {link_cmd}")
+    lines.append("  description = LINK $out")
+    lines.append("")
+
+    srcs = sorted(Path("src").glob("*.cpp"))
+    objects: list[str] = []
+    for src in srcs:
+        obj = f"obj/{src.stem}.o"
+        cxxflags = " ".join(filter(None, [CXXFLAGS, CXXFLAGS_VARIANT[variant]]))
+        lines.append(f"build {obj}: cxx {src}")
+        lines.append(f"  cflags = {cxxflags} -MMD -MF {obj}.d")
+        lines.append("")
+        objects.append(obj)
+
+    lines.append("build game: link " + " ".join(objects))
+    lines.append(f"  ldflags = {LINKFLAGS}")
+    lines.append("")
+    lines.append("default game")
+
+    return "\n".join(lines) + "\n"
+
+
+def _setup_variant_dir(variant: str) -> Path:
+    variant_dir = ROOT / "build" / variant
+    variant_dir.mkdir(parents=True, exist_ok=True)
+    src_link = variant_dir / "src"
+    if not src_link.exists():
+        src_link.symlink_to(ROOT / "src", target_is_directory=True)
+    (variant_dir / "build.ninja").write_text(_generate_build_ninja(variant))
+    return variant_dir
+
+
+@cli()
+def clean(variant: str) -> None:
+    """clean build artifacts"""
+    variant_dir = ROOT / "build" / variant
+    if variant_dir.exists():
+        sh("rm", "-rf", str(variant_dir))
+
+
+@cli("targets", nargs="*", help="targets to build")
+def build(variant: str, targets: tuple[str, ...]) -> None:
+    """build with ninja"""
+    variant_dir = _setup_variant_dir(variant)
+    sh("ninja", "-C", str(variant_dir), *targets)
+    game = variant_dir / "game"
+    if game.exists():
+        print(f"  {game.stat().st_size / (1 << 20):.3f} MB  {game.relative_to(ROOT)}")
+
+
+@cli("program_args", nargs="*", help="program to run")
+def run(variant: str, program_args: tuple[str, ...]) -> None:
+    """run the command (default: game)"""
+    program_args = program_args or ("game",)
+    program, *args = program_args
+    build(variant, (program,))
+    sh(str(ROOT / "build" / variant / program), *args)
+
+
+@cli()
+def ci(variant: str) -> None:
+    """run continuous integration checks"""
+    build(variant, targets=())
+
+
+# Script
+def _main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "-v",
+        "--variant",
+        action="append",
+        choices=["debug", "release"],
+    )
+    parser.set_defaults(action=lambda **args: run(program_args=(), **args))
+
+    subs = parser.add_subparsers()
+    for key, value in globals().items():
+        if hasattr(value, "cli_args"):
+            sub = subs.add_parser(key.replace("_", "-"), help=value.__doc__)
+            for args, kwargs in value.cli_args:
+                sub.add_argument(*args, **kwargs)
+            sub.set_defaults(action=value)
+
+    args = vars(parser.parse_args())
+    action = args.pop("action")
+    for variant in args.pop("variant") or ("release",):
+        action(variant=variant, **args)
+
+
+if __name__ == "__main__":
+    _main()
