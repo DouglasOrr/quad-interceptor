@@ -37,7 +37,7 @@ CXX = "clang++"
 CXXFLAGS = (
     "-Wall -Wextra -Werror -fcolor-diagnostics -ffunction-sections -fdata-sections"
 )
-LINKFLAGS = "-Wl,--gc-sections -fcolor-diagnostics"
+LINKFLAGS = "-fcolor-diagnostics -Wl,--gc-sections -Wl,-no-undefined"
 LIBS = (
     subprocess.run(
         ["pkg-config", "--libs", "sdl2"], capture_output=True, text=True

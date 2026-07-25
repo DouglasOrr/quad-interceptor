@@ -1,9 +1,11 @@
 #include <SDL.h>
-#include <SDL_opengl.h>
-
 #include <stdexcept>
 
 #include "platform.hpp"
+
+#define INSTANTIATE_EXTERN(ret, name, ...) name##_t name = nullptr;
+FOREACH_GL_FUNCTION(INSTANTIATE_EXTERN)
+#undef INSTANTIATE_EXTERN
 
 struct Window::State {
     SDL_Window* window = nullptr;
@@ -36,6 +38,10 @@ Window::Window(const char* title, int width, int height) : state_(std::make_uniq
         SDL_Quit();
         throw std::runtime_error(err);
     }
+
+#define LOAD_GL(ret, name, ...) name = (name##_t)SDL_GL_GetProcAddress(#name);
+    FOREACH_GL_FUNCTION(LOAD_GL)
+#undef LOAD_GL
 
     SDL_GL_SetSwapInterval(1);
 }
