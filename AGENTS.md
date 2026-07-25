@@ -4,7 +4,12 @@
 
 ```
 examples/<DD>-<name> -- standalone examples/demos
+src/                 -- the game; all *.cpp are globbed by `dev` into one `game` binary
 ```
+
+## Commands
+
+- `./dev -v <debug|release> build` (also `run`, `clean`, `ci`).
 
 ## Instructions
 
@@ -12,6 +17,6 @@ examples/<DD>-<name> -- standalone examples/demos
 
 ## Style
 
-- C++20, -Wall -Wextra -Werror, clang-format
+- C++20, -Wall -Wextra -Werror, clang-format.
 - Prefer concise code. Inline implementations where possible. Outline for reuse or clarity, where it reduces complexity.
 - Simple and direct over abstract and general.
