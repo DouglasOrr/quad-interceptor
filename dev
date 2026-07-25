@@ -34,8 +34,19 @@ def cli(*args: Any, **kwargs: Any) -> Callable[[Any], Any]:
 # Commands
 
 CXX = "clang++"
-CXXFLAGS = "-Wall -Wextra -Werror -ffunction-sections -fdata-sections"
-LINKFLAGS = "-Wl,--gc-sections"
+CXXFLAGS = (
+    "-Wall -Wextra -Werror -fcolor-diagnostics -ffunction-sections -fdata-sections"
+)
+LINKFLAGS = "-Wl,--gc-sections -fcolor-diagnostics"
+LIBS = (
+    subprocess.run(
+        ["pkg-config", "--libs", "sdl2"], capture_output=True, text=True
+    ).stdout.strip()
+    + " -lGL"
+)
+SDL_CFLAGS = subprocess.run(
+    ["pkg-config", "--cflags", "sdl2"], capture_output=True, text=True
+).stdout.strip()
 CXXFLAGS_VARIANT = {
     "debug": "-O0 -g -DDEBUG",
     "release": "-Os -DNDEBUG",
@@ -64,14 +75,16 @@ def _generate_build_ninja(variant: str) -> str:
     objects: list[str] = []
     for src in srcs:
         obj = f"obj/{src.stem}.o"
-        cxxflags = " ".join(filter(None, [CXXFLAGS, CXXFLAGS_VARIANT[variant]]))
+        cxxflags = " ".join(
+            filter(None, [CXXFLAGS, SDL_CFLAGS, CXXFLAGS_VARIANT[variant]])
+        )
         lines.append(f"build {obj}: cxx {src}")
         lines.append(f"  cflags = {cxxflags} -MMD -MF {obj}.d")
         lines.append("")
         objects.append(obj)
 
     lines.append("build game: link " + " ".join(objects))
-    lines.append(f"  ldflags = {LINKFLAGS}")
+    lines.append(f"  ldflags = {LINKFLAGS} {LIBS}")
     lines.append("")
     lines.append("default game")
 
