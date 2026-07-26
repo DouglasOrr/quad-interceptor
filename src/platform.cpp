@@ -39,13 +39,10 @@ Window::Window(const char* title, int width, int height) : state(std::make_uniqu
     FOREACH_GL_FUNCTION(LOAD_GL)
 #undef LOAD_GL
 
-    {
-        int w, h;
-        SDL_GL_GetDrawableSize(state->window, &w, &h);
-        glViewport(0, 0, w, h);
-    }
-
     // Set defaults
+    int w, h;
+    SDL_GL_GetDrawableSize(state->window, &w, &h);
+    glViewport(0, 0, w, h);
     SDL_GL_SetSwapInterval(1);
 }
 
