@@ -30,8 +30,7 @@
 FOREACH_GL_FUNCTION(DECLARE_EXTERN)
 #undef DECLARE_EXTERN
 
-class Window {
-public:
+struct Window {
     Window(const char* title, int width, int height);
     ~Window();
 
