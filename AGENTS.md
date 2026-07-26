@@ -9,7 +9,8 @@ src/                 -- the game; all *.cpp are globbed by `dev` into one `game`
 
 ## Commands
 
-- `./dev -v <debug|release> build` (also `run`, `clean`, `ci`).
+- `./dev -v <debug|release> build` (also `run`, `clean`, `ci`)
+- `./dev run test`
 
 ## Instructions
 
