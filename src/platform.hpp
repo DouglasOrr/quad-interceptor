@@ -21,6 +21,13 @@
     OP(void, glEnableVertexAttribArray, GLuint)                                             \
     OP(void, glGetShaderiv, GLuint, GLenum, GLint*)                                         \
     OP(void, glGetShaderInfoLog, GLuint, GLsizei, GLsizei*, GLchar*)                        \
+    OP(void, glDeleteShader, GLuint)                                                        \
+    OP(void, glDeleteProgram, GLuint)                                                       \
+    OP(void, glDeleteBuffers, GLsizei, GLuint*)                                             \
+    OP(void, glDeleteVertexArrays, GLsizei, GLuint*)                                        \
+    OP(GLint, glGetUniformLocation, GLuint, const GLchar*)                                  \
+    OP(void, glUniformMatrix4fv, GLint, GLsizei, GLboolean, const GLfloat*)                 \
+    OP(void, glUniform3fv, GLint, GLsizei, const GLfloat*)                                  \
     OP(void, glGetProgramiv, GLuint, GLenum, GLint*)                                        \
     OP(void, glGetProgramInfoLog, GLuint, GLsizei, GLsizei*, GLchar*)
 
@@ -39,5 +46,5 @@ struct Window {
 
 private:
     struct State;
-    std::unique_ptr<State> state_;
+    std::unique_ptr<State> state;
 };

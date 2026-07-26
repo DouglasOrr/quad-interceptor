@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <vector>
 
 using uint = unsigned int;
@@ -30,4 +31,18 @@ struct Physics {
     inline static constexpr float dt = 1e-3f;  // seconds per tick
 
     static void tick(GameState& state);
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Renderer
+
+struct Renderer {
+    Renderer();
+    ~Renderer();
+
+    void draw(const GameState& state);
+
+private:
+    struct State;
+    std::unique_ptr<State> state;
 };
