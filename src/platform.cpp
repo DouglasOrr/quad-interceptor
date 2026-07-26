@@ -17,12 +17,10 @@ Window::Window(const char* title, int width, int height) : state_(std::make_uniq
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
-
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
-
     state_->window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
                                       height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
     if (!state_->window) {
@@ -30,7 +28,6 @@ Window::Window(const char* title, int width, int height) : state_(std::make_uniq
         SDL_Quit();
         throw std::runtime_error(err);
     }
-
     state_->gl_context = SDL_GL_CreateContext(state_->window);
     if (!state_->gl_context) {
         std::string err = std::string("Failed to create GL context: ") + SDL_GetError();
@@ -38,11 +35,11 @@ Window::Window(const char* title, int width, int height) : state_(std::make_uniq
         SDL_Quit();
         throw std::runtime_error(err);
     }
-
 #define LOAD_GL(ret, name, ...) name = (name##_t)SDL_GL_GetProcAddress(#name);
     FOREACH_GL_FUNCTION(LOAD_GL)
 #undef LOAD_GL
 
+    // Set defaults
     SDL_GL_SetSwapInterval(1);
 }
 

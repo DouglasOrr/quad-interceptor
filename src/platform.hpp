@@ -35,8 +35,7 @@ public:
     Window(const char* title, int width, int height);
     ~Window();
 
-    // Swap buffers and process input events,
-    // returns false if the window should close
+    // Swap buffers and process input events, returns false if the window should close
     bool frame();
 
 private:
