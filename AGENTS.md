@@ -3,8 +3,9 @@
 ## Structure
 
 ```
-examples/<DD>-<name> -- standalone examples/demos
+dev                  -- automation (standard build & run commands)
 src/                 -- the game; all *.cpp are globbed by `dev` into one `game` binary
+examples/<DD>-<name> -- standalone examples/demos
 ```
 
 ## Commands
@@ -14,7 +15,7 @@ src/                 -- the game; all *.cpp are globbed by `dev` into one `game`
 
 ## Instructions
 
-- Leave git commands to me, except e.g. when reviewing diffs.
+- Leave git edit commands to the user, except where explicitly prompted.
 
 ## Style
 

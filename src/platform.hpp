@@ -1,5 +1,6 @@
 #pragma once
 
+#include <SDL.h>
 #include <SDL_opengl.h>
 #include <cstdint>
 #include <memory>
@@ -47,4 +48,18 @@ struct Window {
 private:
     struct State;
     std::unique_ptr<State> state;
+};
+
+struct Stopwatch {
+    uint64_t start;
+    uint64_t freq;
+
+    Stopwatch() : start(SDL_GetPerformanceCounter()), freq(SDL_GetPerformanceFrequency()) {}
+
+    float lap() {
+        const uint64_t now = SDL_GetPerformanceCounter();
+        auto result = static_cast<float>(now - start) / static_cast<float>(freq);
+        start = now;
+        return result;
+    }
 };

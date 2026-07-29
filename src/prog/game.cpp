@@ -15,13 +15,16 @@ int main() {
               .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
               .control = {}},
     };
-
     Renderer renderer;
-    while (window.frame()) {
-        glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    Stopwatch stopwatch;
+    float physics_time = 0.0f;
 
-        Physics::tick(state);  // TODO: multi-tick
+    while (window.frame()) {
+        physics_time = std::min(0.25f, physics_time + stopwatch.lap());
+        while (physics_time >= Physics::dt) {
+            Physics::tick(state);
+            physics_time -= Physics::dt;
+        }
         renderer.draw(state);
     }
 }
