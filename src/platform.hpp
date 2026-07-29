@@ -38,12 +38,23 @@
 FOREACH_GL_FUNCTION(DECLARE_EXTERN)
 #undef DECLARE_EXTERN
 
+enum class Key : uint8_t {
+    w, a, s, d, q, e, space, shift,
+    left, right, up, down,
+    x, z, ctrl, comma, period,
+    esc,
+    count,
+};
+
 struct Window {
     Window(const char* title, int width, int height);
     ~Window();
 
     // Swap buffers and process input events, returns false if the window should close
     bool frame();
+
+    // Query a key's held state as of the most recent frame()
+    bool held(Key k) const;
 
 private:
     struct State;

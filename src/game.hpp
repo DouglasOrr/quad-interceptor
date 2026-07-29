@@ -17,7 +17,7 @@ struct Drone {
     Vec<3> position;
     Vec<3> velocity;
     Quat orientation;
-    Vec<4> control;  // (left/right, forward/backward, up/down, yaw)
+    Vec<4> control;  // (right/left, forward/backward, up/down, yaw)
 };
 
 struct GameState {
