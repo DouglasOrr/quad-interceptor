@@ -12,11 +12,19 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+class Fail(Exception):
+    """A command failed; propagate to the top level as an exit code."""
+
+    def __init__(self, code: int) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 def sh(*cmd: str) -> None:
     cmd = tuple(str(c) for c in cmd if c is not None)
     print("$ " + " ".join(cmd), file=sys.stderr)
-    if exit_code := subprocess.run(cmd).returncode:
-        sys.exit(exit_code)
+    if code := subprocess.run(cmd).returncode:
+        raise Fail(code)
 
 
 def sho(cmd: str) -> str:
@@ -161,23 +169,33 @@ def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
     proc: subprocess.Popen[bytes] | None = None
     try:
         last_src_mtime = get_src_mtime()
-        build(variant, (program,))
+        try:
+            build(variant, (program,))
+        except Fail:
+            pass
         last_exe_hash = get_exe_hash()
-        proc = subprocess.Popen([str(exe), *args])
+        if last_exe_hash is not None:
+            proc = subprocess.Popen([str(exe), *args])
 
-        while proc.poll() is None:
+        while proc is None or proc.poll() is None:
             time.sleep(0.1)
             src_mtime = get_src_mtime()
             if src_mtime <= last_src_mtime:
                 continue
             last_src_mtime = src_mtime
-            build(variant, (program,))
-            exe_hash = get_exe_hash()
             ts = time.strftime("%H:%M:%S")
-            if exe_hash != last_exe_hash:
+            try:
+                build(variant, (program,))
+            except Fail:
+                print(f"[{ts}] build failed (watching)")
+                continue
+            exe_hash = get_exe_hash()
+            if exe_hash is None:
+                continue
+            if proc is None or exe_hash != last_exe_hash:
                 last_exe_hash = exe_hash
                 print(f"[{ts}] rebuilt (reloading)")
-                if proc.poll() is None:
+                if proc is not None and proc.poll() is None:
                     proc.terminate()
                     proc.wait()
                 proc = subprocess.Popen([str(exe), *args])
@@ -234,8 +252,11 @@ def _main() -> None:
 
     args = vars(parser.parse_args())
     action = args.pop("action")
-    for variant in args.pop("variant") or ("release",):
-        action(variant=variant, **args)
+    try:
+        for variant in args.pop("variant") or ("release",):
+            action(variant=variant, **args)
+    except Fail as e:
+        sys.exit(e.code)
 
 
 if __name__ == "__main__":
