@@ -3,8 +3,10 @@
 """development runner script"""
 
 import argparse
+import hashlib
 import subprocess
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable
@@ -125,12 +127,68 @@ def build(variant: str, targets: tuple[str, ...]) -> None:
 
 
 @cli("program_args", nargs="*", help="program to run")
-def run(variant: str, program_args: tuple[str, ...]) -> None:
+@cli(
+    "--reload",
+    action="store_true",
+    help="rebuild and restart when the executable changes",
+)
+def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
     """run the command (default: game)"""
     program_args = program_args or ("game",)
     program, *args = program_args
-    build(variant, (program,))
-    sh(str(ROOT / "build" / variant / program), *args)
+    exe = ROOT / "build" / variant / program
+
+    if not reload:
+        build(variant, (program,))
+        sh(str(exe), *args)
+        return
+
+    def get_src_mtime() -> float:
+        srcs = [str(p) for p in (ROOT / "src").rglob("*.cpp")]
+        srcs += [str(p) for p in (ROOT / "src").rglob("*.hpp")]
+        srcs += [str(ROOT / "dev")]
+        return max(Path(s).stat().st_mtime for s in srcs if Path(s).exists())
+
+    def get_exe_hash() -> str | None:
+        if not exe.exists():
+            return None
+        h = hashlib.sha256()
+        with open(exe, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 16), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    proc: subprocess.Popen[bytes] | None = None
+    try:
+        last_src_mtime = get_src_mtime()
+        build(variant, (program,))
+        last_exe_hash = get_exe_hash()
+        proc = subprocess.Popen([str(exe), *args])
+
+        while proc.poll() is None:
+            time.sleep(0.1)
+            src_mtime = get_src_mtime()
+            if src_mtime <= last_src_mtime:
+                continue
+            last_src_mtime = src_mtime
+            build(variant, (program,))
+            exe_hash = get_exe_hash()
+            ts = time.strftime("%H:%M:%S")
+            if exe_hash != last_exe_hash:
+                last_exe_hash = exe_hash
+                print(f"[{ts}] rebuilt (reloading)")
+                if proc.poll() is None:
+                    proc.terminate()
+                    proc.wait()
+                proc = subprocess.Popen([str(exe), *args])
+            else:
+                print(f"[{ts}] rebuilt (unchanged)")
+    except KeyboardInterrupt:
+        pass
+    finally:
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
+            proc.wait()
 
 
 @cli()
@@ -164,7 +222,7 @@ def _main() -> None:
         action="append",
         choices=["debug", "release"],
     )
-    parser.set_defaults(action=lambda **args: run(program_args=(), **args))
+    parser.set_defaults(action=lambda **args: run(program_args=(), reload=True, **args))
 
     subs = parser.add_subparsers()
     for key, value in globals().items():
