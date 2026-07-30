@@ -16,11 +16,15 @@ int main() {
 
     GameState state;
     state.drones = {
-        Drone{.position = {0.0f, 0.0f, 0.0f},
+        Drone{.position = {0.0f, 0.0f, 1.0f},
               .velocity = {},
               .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
               .control = {}},
-        Drone{.position = {3.0f, 0.0f, 0.0f},
+        Drone{.position = {10.0f, 0.0f, 1.0f},
+              .velocity = {},
+              .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
+              .control = {}},
+        Drone{.position = {20.0f, 5.0f, 2.0f},
               .velocity = {},
               .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
               .control = {}},
