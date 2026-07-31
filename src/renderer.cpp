@@ -4,8 +4,136 @@
 #include <array>
 #include <cmath>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 namespace {
+
+////////////////////////////////////////////////////////////////////////////////
+// RAII OpenGL resource handles. Move-only; the moved-from object is left empty
+// (id == 0) so the destructor is a no-op.
+
+struct GlBuffer {
+    GLuint id = 0;
+
+    GlBuffer() { glGenBuffers(1, &id); }
+    ~GlBuffer() {
+        if (id) glDeleteBuffers(1, &id);
+    }
+    GlBuffer(const GlBuffer&) = delete;
+    GlBuffer& operator=(const GlBuffer&) = delete;
+    GlBuffer(GlBuffer&& o) noexcept : id(o.id) { o.id = 0; }
+    GlBuffer& operator=(GlBuffer&& o) noexcept {
+        if (this != &o) std::swap(id, o.id);
+        return *this;
+    }
+};
+
+struct GlVertexArray {
+    GLuint id = 0;
+
+    GlVertexArray() { glGenVertexArrays(1, &id); }
+    ~GlVertexArray() {
+        if (id) glDeleteVertexArrays(1, &id);
+    }
+    GlVertexArray(const GlVertexArray&) = delete;
+    GlVertexArray& operator=(const GlVertexArray&) = delete;
+    GlVertexArray(GlVertexArray&& o) noexcept : id(o.id) { o.id = 0; }
+    GlVertexArray& operator=(GlVertexArray&& o) noexcept {
+        if (this != &o) std::swap(id, o.id);
+        return *this;
+    }
+};
+
+// Typed uniform location. Setting an unset (-1) location is a no-op.
+struct Uniform {
+    GLint loc = -1;
+
+    void set(const std::array<float, 16>& m) const {
+        if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, m.data());
+    }
+    void set(const std::array<float, 3>& v) const {
+        if (loc >= 0) glUniform3fv(loc, 1, v.data());
+    }
+};
+
+struct GlProgram {
+    GLuint id = 0;
+
+    GlProgram() = default;
+    GlProgram(const char* v_src, const char* f_src) {
+        GLuint vs = compile(GL_VERTEX_SHADER, v_src);
+        GLuint fs = compile(GL_FRAGMENT_SHADER, f_src);
+        id = glCreateProgram();
+        glAttachShader(id, vs);
+        glAttachShader(id, fs);
+        glLinkProgram(id);
+        GLint ok;
+        glGetProgramiv(id, GL_LINK_STATUS, &ok);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        if (!ok) {
+            char log[512];
+            glGetProgramInfoLog(id, 512, nullptr, log);
+            glDeleteProgram(id);
+            id = 0;
+            throw std::runtime_error(std::string("program link: ") + log);
+        }
+    }
+    ~GlProgram() {
+        if (id) glDeleteProgram(id);
+    }
+    GlProgram(const GlProgram&) = delete;
+    GlProgram& operator=(const GlProgram&) = delete;
+    GlProgram(GlProgram&& o) noexcept : id(o.id) { o.id = 0; }
+    GlProgram& operator=(GlProgram&& o) noexcept {
+        if (this != &o) std::swap(id, o.id);
+        return *this;
+    }
+
+    void use() const { glUseProgram(id); }
+    Uniform uniform(const char* name) const { return {glGetUniformLocation(id, name)}; }
+
+private:
+    static GLuint compile(GLenum type, const char* src) {
+        GLuint s = glCreateShader(type);
+        glShaderSource(s, 1, &src, nullptr);
+        glCompileShader(s);
+        GLint ok;
+        glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
+        if (!ok) {
+            char log[512];
+            glGetShaderInfoLog(s, 512, nullptr, log);
+            glDeleteShader(s);
+            throw std::runtime_error(std::string("shader compile: ") + log + "\n--- source ---\n" +
+                                     src);
+        }
+        return s;
+    }
+};
+
+// A static vertex buffer + its VAO, with attribute location 0 configured as a
+// vec3. Bundles the vertex count so draw() needs no extra arguments.
+struct Mesh {
+    GlVertexArray vao;
+    GlBuffer vbo;
+    GLsizei count = 0;
+
+    Mesh() = default;
+    Mesh(const void* data, GLsizeiptr bytes, GLsizei count) : count(count) {
+        glBindVertexArray(vao.id);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo.id);
+        glBufferData(GL_ARRAY_BUFFER, bytes, data, GL_STATIC_DRAW);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+        glEnableVertexAttribArray(0);
+        glBindVertexArray(0);
+    }
+
+    void draw(GLenum mode) const {
+        glBindVertexArray(vao.id);
+        glDrawArrays(mode, 0, count);
+    }
+};
 
 using Mat4 = std::array<float, 16>;  // column-major: index = i44(row, col)
 
@@ -102,37 +230,6 @@ Mat4 mul(const Mat4& a, const Mat4& b) {
     return r;
 }
 
-GLuint compile_shader(GLenum type, const char* src) {
-    GLuint s = glCreateShader(type);
-    glShaderSource(s, 1, &src, nullptr);
-    glCompileShader(s);
-    GLint ok;
-    glGetShaderiv(s, GL_COMPILE_STATUS, &ok);
-    if (!ok) {
-        char log[512];
-        glGetShaderInfoLog(s, 512, nullptr, log);
-        glDeleteShader(s);
-        throw std::runtime_error(std::string("shader compile: ") + log);
-    }
-    return s;
-}
-
-GLuint link_program(GLuint vs, GLuint fs) {
-    GLuint p = glCreateProgram();
-    glAttachShader(p, vs);
-    glAttachShader(p, fs);
-    glLinkProgram(p);
-    GLint ok;
-    glGetProgramiv(p, GL_LINK_STATUS, &ok);
-    if (!ok) {
-        char log[512];
-        glGetProgramInfoLog(p, 512, nullptr, log);
-        glDeleteProgram(p);
-        throw std::runtime_error(std::string("program link: ") + log);
-    }
-    return p;
-}
-
 // Scene constants.
 constexpr float DRONE_Z_SCALE = 0.15f;  // model Z-thickness for drones
 constexpr float FLOOR_HALF = 20.0f;     // floor spans +/-FLOOR_HALF on X/Y
@@ -168,19 +265,15 @@ constexpr float CUBE[] = {
 }  // namespace
 
 struct Renderer::State {
-    GLuint program = 0;
-    GLuint drone_vao = 0;
-    GLuint drone_vbo = 0;
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_color;
 
-    GLuint floor_vao = 0;
-    GLuint floor_vbo = 0;
-    GLuint grid_vao = 0;
-    GLuint grid_vbo = 0;
-    GLsizei grid_vertices = 0;
+    Mesh drone;
+    Mesh floor;
+    Mesh grid;
 
-    GLint u_mvp = -1;
-    GLint u_color = -1;
-    Mat4 projection{};
+    Mat4 projection;
 };
 
 Renderer::Renderer() : state(std::make_unique<State>()) {
@@ -195,22 +288,10 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
         "uniform vec3 u_color;\n"
         "void main(){ frag = vec4(u_color, 1.0); }\n";
 
-    GLuint vs = compile_shader(GL_VERTEX_SHADER, v_src);
-    GLuint fs = compile_shader(GL_FRAGMENT_SHADER, f_src);
-    state->program = link_program(vs, fs);
-    glDeleteShader(vs);
-    glDeleteShader(fs);
-    state->u_mvp = glGetUniformLocation(state->program, "u_mvp");
-    state->u_color = glGetUniformLocation(state->program, "u_color");
-
-    glGenVertexArrays(1, &state->drone_vao);
-    glGenBuffers(1, &state->drone_vbo);
-    glBindVertexArray(state->drone_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, state->drone_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(CUBE), CUBE, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
+    state->program = GlProgram(v_src, f_src);
+    state->u_mvp = state->program.uniform("u_mvp");
+    state->u_color = state->program.uniform("u_color");
+    state->drone = Mesh(CUBE, sizeof(CUBE), 36);
 
     // Floor at z=0.
     constexpr float floor_quad[] = {
@@ -218,15 +299,7 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
         FLOOR_HALF,  FLOOR_HALF,  0.0f, -FLOOR_HALF, -FLOOR_HALF, 0.0f,
         FLOOR_HALF,  FLOOR_HALF,  0.0f, -FLOOR_HALF, FLOOR_HALF,  0.0f,
     };
-
-    glGenVertexArrays(1, &state->floor_vao);
-    glGenBuffers(1, &state->floor_vbo);
-    glBindVertexArray(state->floor_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, state->floor_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(floor_quad), floor_quad, GL_STATIC_DRAW);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
+    state->floor = Mesh(floor_quad, sizeof(floor_quad), 6);
 
     // Grid lines on the same plane, rendered slightly above to avoid z-fighting.
     std::vector<float> grid;
@@ -241,16 +314,8 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
         float x2 = FLOOR_HALF;
         grid.insert(grid.end(), {x1, y, GRID_Z, x2, y, GRID_Z});
     }
-
-    glGenVertexArrays(1, &state->grid_vao);
-    glGenBuffers(1, &state->grid_vbo);
-    glBindVertexArray(state->grid_vao);
-    glBindBuffer(GL_ARRAY_BUFFER, state->grid_vbo);
-    glBufferData(GL_ARRAY_BUFFER, grid.size() * sizeof(float), grid.data(), GL_STATIC_DRAW);
-    state->grid_vertices = static_cast<GLsizei>(grid.size() / 3);
-    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-    glEnableVertexAttribArray(0);
-    glBindVertexArray(0);
+    state->grid =
+        Mesh(grid.data(), grid.size() * sizeof(float), static_cast<GLsizei>(grid.size() / 3));
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
@@ -258,43 +323,29 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
     state->projection = perspective(3.14159f / 3.0f, 16.0f / 9.0f, 0.1f, 100.0f);
 }
 
-Renderer::~Renderer() {
-    if (state->program) glDeleteProgram(state->program);
-    if (state->drone_vbo) glDeleteBuffers(1, &state->drone_vbo);
-    if (state->drone_vao) glDeleteVertexArrays(1, &state->drone_vao);
-    if (state->floor_vbo) glDeleteBuffers(1, &state->floor_vbo);
-    if (state->floor_vao) glDeleteVertexArrays(1, &state->floor_vao);
-    if (state->grid_vbo) glDeleteBuffers(1, &state->grid_vbo);
-    if (state->grid_vao) glDeleteVertexArrays(1, &state->grid_vao);
-}
+Renderer::~Renderer() = default;
 
 void Renderer::draw(const GameState& s) {
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
 
+    state->program.use();
+
     // Chase drone 0
     const Drone& d0 = s.drones[0];
     Vec<3> eye = add(d0.position, rotate(d0.orientation, CAM_OFFSET_VEC));
     Mat4 view = inverse_rigid(mul(quat_translation(d0.orientation, eye), CAM_ROTATION));
 
-    glUseProgram(state->program);
-
     // Draw floor (opaque quad), then grid lines.
     Mat4 mvp = mul(state->projection, view);
-    glUniformMatrix4fv(state->u_mvp, 1, GL_FALSE, mvp.data());
-    static constexpr Vec<3> floor_color{0.05f, 0.05f, 0.07f};
-    glUniform3fv(state->u_color, 1, floor_color.data());
+    state->u_mvp.set(mvp);
+    state->u_color.set(Vec<3>{0.05f, 0.05f, 0.07f});
+    state->floor.draw(GL_TRIANGLES);
 
-    glBindVertexArray(state->floor_vao);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+    state->u_color.set(Vec<3>{0.35f, 0.35f, 0.45f});
+    state->grid.draw(GL_LINES);
 
-    static constexpr Vec<3> grid_color{0.35f, 0.35f, 0.45f};
-    glUniform3fv(state->u_color, 1, grid_color.data());
-    glBindVertexArray(state->grid_vao);
-    glDrawArrays(GL_LINES, 0, state->grid_vertices);
-
-    glBindVertexArray(state->drone_vao);
     static constexpr Vec<3> colors[] = {
         {1.0f, 0.3f, 0.3f},
         {0.3f, 1.0f, 0.3f},
@@ -306,8 +357,8 @@ void Renderer::draw(const GameState& s) {
         Mat4 model =
             mul(quat_translation(d.orientation, d.position), scale(1.0f, 1.0f, DRONE_Z_SCALE));
         Mat4 mvp = mul(state->projection, mul(view, model));
-        glUniformMatrix4fv(state->u_mvp, 1, GL_FALSE, mvp.data());
-        glUniform3fv(state->u_color, 1, colors[i % 3].data());
-        glDrawArrays(GL_TRIANGLES, 0, 36);
+        state->u_mvp.set(mvp);
+        state->u_color.set(colors[i % 3]);
+        state->drone.draw(GL_TRIANGLES);
     }
 }
