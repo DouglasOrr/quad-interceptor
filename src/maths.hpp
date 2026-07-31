@@ -35,10 +35,23 @@ using Mat4 = Mat<4, 4>;
 // `mat_`/`vec_` prefix; operations on existing values take no prefix.
 
 template <uint N>
-Vec<N> add(Vec<N> a, const Vec<N>& b) {
+Vec<N> operator+(Vec<N> a, const Vec<N>& b) {
     for (uint i = 0; i < N; ++i)
         a[i] += b[i];
     return a;
+}
+
+template <uint N>
+Vec<N>& operator+=(Vec<N>& a, const Vec<N>& b) {
+    a = a + b;
+    return a;
+}
+
+template <uint N>
+Vec<N> operator*(float a, Vec<N> b) {
+    for (uint i = 0; i < N; ++i)
+        b[i] *= a;
+    return b;
 }
 
 inline Mat4 mat_perspective(float fov_y, float aspect, float z_near, float z_far) {

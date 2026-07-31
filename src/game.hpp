@@ -9,10 +9,18 @@
 // State
 
 struct Drone {
-    Vec<3> position;
-    Vec<3> velocity;
-    Quat orientation;
-    Vec<4> control;  // (right/left, forward/backward, up/down, yaw)
+    // static properties
+    float mass;
+    Mat<3, 3> inv_inertia;  // (model)
+
+    // dynamic state
+    Vec<3> position;      // (world)
+    Vec<3> velocity;      // (world)
+    Quat orientation;     // (model -> world)
+    Vec<3> ang_momentum;  // (world)
+    Vec<4> control;       // (right/left, forward/backward, up/down, clock/anticlock)
+
+    static Drone create(Vec<3> position);
 };
 
 struct GameState {

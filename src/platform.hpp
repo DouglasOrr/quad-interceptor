@@ -39,7 +39,7 @@ FOREACH_GL_FUNCTION(DECLARE_EXTERN)
 #undef DECLARE_EXTERN
 
 enum class Key : uint8_t {
-    w, a, s, d, q, e, space, shift,
+    w, a, s, d, q, e, c, space, shift,
     left, right, up, down,
     x, z, ctrl, comma, period,
     esc,

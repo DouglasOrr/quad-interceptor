@@ -4,10 +4,19 @@
 namespace {
 void copy_control(const Window& w, Vec<4>& c) {
     auto f = [](bool b) { return b ? 1.0f : 0.0f; };
-    c[0] = f(w.held(Key::d)) + f(w.held(Key::right)) - f(w.held(Key::a)) - f(w.held(Key::left));
-    c[1] = f(w.held(Key::w)) + f(w.held(Key::up)) - f(w.held(Key::s)) - f(w.held(Key::down));
-    c[2] = f(w.held(Key::shift)) + f(w.held(Key::x)) - f(w.held(Key::ctrl)) - f(w.held(Key::z));
-    c[3] = f(w.held(Key::e)) + f(w.held(Key::period)) - f(w.held(Key::q)) - f(w.held(Key::comma));
+    c = {};
+    // WSAD
+    c[0] += f(w.held(Key::d)) - f(w.held(Key::a));
+    c[1] += f(w.held(Key::w)) - f(w.held(Key::s));
+    // Arrows
+    c[0] += f(w.held(Key::right)) - f(w.held(Key::left));
+    c[1] += f(w.held(Key::up)) - f(w.held(Key::down));
+    // ZXC
+    c[2] += f(w.held(Key::x));
+    c[3] += f(w.held(Key::c)) - f(w.held(Key::z));
+    // QEShift
+    c[2] += f(w.held(Key::shift));
+    c[3] += f(w.held(Key::e)) - f(w.held(Key::q));
 }
 }  // namespace
 
@@ -16,18 +25,9 @@ int main() {
 
     GameState state;
     state.drones = {
-        Drone{.position = {0.0f, 0.0f, 1.0f},
-              .velocity = {},
-              .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
-              .control = {}},
-        Drone{.position = {10.0f, 0.0f, 1.0f},
-              .velocity = {},
-              .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
-              .control = {}},
-        Drone{.position = {20.0f, 5.0f, 2.0f},
-              .velocity = {},
-              .orientation = {0.0f, 0.0f, 0.0f, 1.0f},
-              .control = {}},
+        Drone::create({0.0f, 0.0f, 1.0f}),
+        Drone::create({10.0f, 0.0f, 1.0f}),
+        Drone::create({20.0f, 5.0f, 2.0f}),
     };
     Renderer renderer;
     Stopwatch stopwatch;

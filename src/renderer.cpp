@@ -241,7 +241,7 @@ void Renderer::draw(const GameState& s) {
 
     // Chase drone 0
     const Drone& d0 = s.drones[0];
-    Vec<3> eye = add(d0.position, rotate(d0.orientation, CAM_OFFSET_VEC));
+    Vec<3> eye = d0.position + rotate(d0.orientation, CAM_OFFSET_VEC);
     Mat4 view = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
 
     // Draw floor (opaque quad), then grid lines.
