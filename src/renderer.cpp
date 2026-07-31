@@ -10,8 +10,7 @@
 namespace {
 
 ////////////////////////////////////////////////////////////////////////////////
-// RAII OpenGL resource handles. Move-only; the moved-from object is left empty
-// (id == 0) so the destructor is a no-op.
+// RAII OpenGL
 
 struct GlBuffer {
     GLuint id = 0;
@@ -49,11 +48,11 @@ struct GlVertexArray {
 struct Uniform {
     GLint loc = -1;
 
-    void set(const std::array<float, 16>& m) const {
-        if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, m.data());
+    void set(const Mat4& m) const {
+        if (loc >= 0) glUniformMatrix4fv(loc, 1, GL_FALSE, m.data);
     }
-    void set(const std::array<float, 3>& v) const {
-        if (loc >= 0) glUniform3fv(loc, 1, v.data());
+    void set(const Vec<3>& v) const {
+        if (loc >= 0) glUniform3fv(loc, 1, v.data);
     }
 };
 
@@ -135,100 +134,8 @@ struct Mesh {
     }
 };
 
-using Mat4 = std::array<float, 16>;  // column-major: index = i44(row, col)
-
-template <size_t N>
-Vec<N> add(Vec<N> a, const Vec<N>& b) {
-    for (size_t i = 0; i < N; ++i)
-        a[i] += b[i];
-    return a;
-}
-
-constexpr int i44(int row, int col) {
-    return col * 4 + row;
-}
-
-Mat4 perspective(float fov_y, float aspect, float z_near, float z_far) {
-    Mat4 m{};
-    const float f = 1.0f / std::tan(fov_y / 2.0f);
-    m[i44(0, 0)] = f / aspect;
-    m[i44(1, 1)] = f;
-    m[i44(2, 2)] = (z_far + z_near) / (z_near - z_far);
-    m[i44(3, 2)] = -1.0f;
-    m[i44(2, 3)] = (2.0f * z_far * z_near) / (z_near - z_far);
-    return m;
-}
-
-Mat4 scale(float x, float y, float z) {
-    Mat4 m{};
-    m[i44(0, 0)] = x;
-    m[i44(1, 1)] = y;
-    m[i44(2, 2)] = z;
-    m[i44(3, 3)] = 1.0f;
-    return m;
-}
-
-Mat4 quat_translation(Quat q, Vec<3> t) {
-    float x = q[0], y = q[1], z = q[2], w = q[3];
-    float xx = x * x, yy = y * y, zz = z * z;
-    float xy = x * y, xz = x * z, yz = y * z;
-    float wx = w * x, wy = w * y, wz = w * z;
-    Mat4 m{};
-    m[i44(0, 0)] = 1.0f - 2.0f * (yy + zz);
-    m[i44(1, 0)] = 2.0f * (xy + wz);
-    m[i44(2, 0)] = 2.0f * (xz - wy);
-    m[i44(0, 1)] = 2.0f * (xy - wz);
-    m[i44(1, 1)] = 1.0f - 2.0f * (xx + zz);
-    m[i44(2, 1)] = 2.0f * (yz + wx);
-    m[i44(0, 2)] = 2.0f * (xz + wy);
-    m[i44(1, 2)] = 2.0f * (yz - wx);
-    m[i44(2, 2)] = 1.0f - 2.0f * (xx + yy);
-    m[i44(0, 3)] = t[0];
-    m[i44(1, 3)] = t[1];
-    m[i44(2, 3)] = t[2];
-    m[i44(3, 3)] = 1.0f;
-    return m;
-}
-
-Vec<3> rotate(Quat q, Vec<3> v) {
-    float x = q[0], y = q[1], z = q[2], w = q[3];
-    return {
-        (1.0f - 2.0f * (y * y + z * z)) * v[0] + 2.0f * (x * y - w * z) * v[1] +
-            2.0f * (x * z + w * y) * v[2],
-        2.0f * (x * y + w * z) * v[0] + (1.0f - 2.0f * (x * x + z * z)) * v[1] +
-            2.0f * (y * z - w * x) * v[2],
-        2.0f * (x * z - w * y) * v[0] + 2.0f * (y * z + w * x) * v[1] +
-            (1.0f - 2.0f * (x * x + y * y)) * v[2],
-    };
-}
-
-// Inverse of a rigid [R|t] transform: [R^T | -R^T t].
-Mat4 inverse_rigid(const Mat4& m) {
-    Mat4 r{};
-    for (int i = 0; i < 3; ++i)
-        for (int j = 0; j < 3; ++j)
-            r[i44(i, j)] = m[i44(j, i)];
-    for (int i = 0; i < 3; ++i) {
-        float s = 0.0f;
-        for (int j = 0; j < 3; ++j)
-            s += r[i44(i, j)] * m[i44(j, 3)];
-        r[i44(i, 3)] = -s;
-    }
-    r[i44(3, 3)] = 1.0f;
-    return r;
-}
-
-Mat4 mul(const Mat4& a, const Mat4& b) {
-    Mat4 r{};
-    for (int c = 0; c < 4; ++c)
-        for (int row = 0; row < 4; ++row) {
-            float s = 0.0f;
-            for (int k = 0; k < 4; ++k)
-                s += a[i44(row, k)] * b[i44(k, c)];
-            r[i44(row, c)] = s;
-        }
-    return r;
-}
+////////////////////////////////////////////////////////////////////////////////
+// Renderer impl
 
 // Scene constants.
 constexpr float DRONE_Z_SCALE = 0.15f;  // model Z-thickness for drones
@@ -320,7 +227,7 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
 
-    state->projection = perspective(3.14159f / 3.0f, 16.0f / 9.0f, 0.1f, 100.0f);
+    state->projection = mat_perspective(3.14159f / 3.0f, 16.0f / 9.0f, 0.1f, 100.0f);
 }
 
 Renderer::~Renderer() = default;
@@ -335,7 +242,7 @@ void Renderer::draw(const GameState& s) {
     // Chase drone 0
     const Drone& d0 = s.drones[0];
     Vec<3> eye = add(d0.position, rotate(d0.orientation, CAM_OFFSET_VEC));
-    Mat4 view = inverse_rigid(mul(quat_translation(d0.orientation, eye), CAM_ROTATION));
+    Mat4 view = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
 
     // Draw floor (opaque quad), then grid lines.
     Mat4 mvp = mul(state->projection, view);
@@ -354,8 +261,7 @@ void Renderer::draw(const GameState& s) {
 
     for (size_t i = 0; i < s.drones.size(); ++i) {
         const Drone& d = s.drones[i];
-        Mat4 model =
-            mul(quat_translation(d.orientation, d.position), scale(1.0f, 1.0f, DRONE_Z_SCALE));
+        Mat4 model = mul(mat_from(d.orientation, d.position), mat_scale(1.0f, 1.0f, DRONE_Z_SCALE));
         Mat4 mvp = mul(state->projection, mul(view, model));
         state->u_mvp.set(mvp);
         state->u_color.set(colors[i % 3]);

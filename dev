@@ -49,7 +49,7 @@ def cli(*args: Any, **kwargs: Any) -> Callable[[Any], Any]:
 ROOT = Path(__file__).parent.resolve()
 CXX = "clang++"
 CXXFLAGS = (
-    "-Wall -Wextra -Werror -fcolor-diagnostics -ffunction-sections -fdata-sections"
+    "-Wall -Wextra -Werror -fcolor-diagnostics -ffunction-sections -fdata-sections -std=c++23"
     " -Isrc -isystem third-party"
     f" {sho('pkg-config --cflags sdl2')}"
 )

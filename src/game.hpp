@@ -1,16 +1,11 @@
 #pragma once
 
-#include <array>
 #include <memory>
 #include <vector>
 
-using uint = unsigned int;
+#include "maths.hpp"
 
-template <uint N>
-using Vec = std::array<float, N>;
-using Quat = Vec<4>;  // (x, y, z, w) where w is the scalar part
-
-///////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 // State
 
 struct Drone {
