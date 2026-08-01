@@ -13,15 +13,16 @@ struct Window::State {
     SDL_GLContext gl_context = nullptr;
     bool started = false;
     std::array<bool, static_cast<size_t>(Key::count)> held_keys{};
+    std::array<bool, static_cast<size_t>(Key::count)> prev_held_keys{};
 };
 
 // Order must match the `Key` enum in platform.hpp.
 static constexpr SDL_Scancode key_scancodes[] = {
-    SDL_SCANCODE_W, SDL_SCANCODE_A, SDL_SCANCODE_S, SDL_SCANCODE_D,
-    SDL_SCANCODE_Q, SDL_SCANCODE_E, SDL_SCANCODE_C, SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT,
-    SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_UP, SDL_SCANCODE_DOWN,
-    SDL_SCANCODE_X, SDL_SCANCODE_Z, SDL_SCANCODE_LCTRL, SDL_SCANCODE_COMMA,
-    SDL_SCANCODE_PERIOD, SDL_SCANCODE_ESCAPE,
+    SDL_SCANCODE_W,      SDL_SCANCODE_A,      SDL_SCANCODE_S,      SDL_SCANCODE_D,
+    SDL_SCANCODE_Q,      SDL_SCANCODE_E,      SDL_SCANCODE_C,      SDL_SCANCODE_SPACE,
+    SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LEFT,   SDL_SCANCODE_RIGHT,  SDL_SCANCODE_UP,
+    SDL_SCANCODE_DOWN,   SDL_SCANCODE_X,      SDL_SCANCODE_Z,      SDL_SCANCODE_LCTRL,
+    SDL_SCANCODE_COMMA,  SDL_SCANCODE_PERIOD, SDL_SCANCODE_ESCAPE, SDL_SCANCODE_3,
 };
 static_assert(std::size(key_scancodes) == static_cast<size_t>(Key::count));
 
@@ -78,15 +79,29 @@ bool Window::frame() {
         if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) return false;
     }
 
+    state->prev_held_keys = state->held_keys;
+
     int numkeys = 0;
     const Uint8* kb = SDL_GetKeyboardState(&numkeys);
     for (size_t i = 0; i < state->held_keys.size(); ++i) {
         SDL_Scancode sc = key_scancodes[i];
-        state->held_keys[i] = sc < numkeys && kb[sc];
+        if (sc == SDL_SCANCODE_3) {
+            state->held_keys[i] =
+                (sc < numkeys && kb[sc]) ||
+                (SDL_SCANCODE_NONUSHASH < numkeys && kb[SDL_SCANCODE_NONUSHASH]) ||
+                (SDL_SCANCODE_BACKSLASH < numkeys && kb[SDL_SCANCODE_BACKSLASH]);
+        } else {
+            state->held_keys[i] = sc < numkeys && kb[sc];
+        }
     }
     return true;
 }
 
 bool Window::held(Key k) const {
     return state->held_keys[static_cast<size_t>(k)];
+}
+
+bool Window::pressed(Key k) const {
+    size_t idx = static_cast<size_t>(k);
+    return state->held_keys[idx] && !state->prev_held_keys[idx];
 }

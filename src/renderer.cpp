@@ -138,9 +138,8 @@ struct Mesh {
 // Renderer impl
 
 // Scene constants.
-constexpr float DRONE_Z_SCALE = 0.15f;  // model Z-thickness for drones
-constexpr float FLOOR_HALF = 20.0f;     // floor spans +/-FLOOR_HALF on X/Y
-constexpr float GRID_STEP = 1.0f;
+constexpr float FLOOR_HALF = 500.0f;  // floor spans +/-FLOOR_HALF on X/Y
+constexpr float GRID_STEP = 3.0f;
 constexpr float GRID_Z = 0.001f;  // slightly above floor to avoid z-fighting
 // constexpr Vec<3> CAM_OFFSET_VEC{0.5f, 0.0f, 0.0f};  // front (cockpit)
 constexpr Vec<3> CAM_OFFSET_VEC{-1.5f, 0.0f, 0.5f};  // chase (behind, slightly up)
@@ -210,8 +209,8 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
 
     // Grid lines on the same plane, rendered slightly above to avoid z-fighting.
     std::vector<float> grid;
-    grid.reserve(6 * 2 * 1024);
-    for (int i = -20; i <= 20; ++i) {
+    auto n_half = int(FLOOR_HALF / GRID_STEP);
+    for (int i = -n_half; i <= n_half; ++i) {
         float x = i * GRID_STEP;
         float y1 = -FLOOR_HALF;
         float y2 = FLOOR_HALF;
@@ -227,7 +226,7 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
 
-    state->projection = mat_perspective(3.14159f / 3.0f, 16.0f / 9.0f, 0.1f, 100.0f);
+    state->projection = mat_perspective(3.14159f / 3.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
 }
 
 Renderer::~Renderer() = default;
@@ -261,7 +260,7 @@ void Renderer::draw(const GameState& s) {
 
     for (size_t i = 0; i < s.drones.size(); ++i) {
         const Drone& d = s.drones[i];
-        Mat4 model = mul(mat_from(d.orientation, d.position), mat_scale(1.0f, 1.0f, DRONE_Z_SCALE));
+        Mat4 model = mul(mat_from(d.orientation, d.position), mat_diag(1, 1, Drone::height, 1));
         Mat4 mvp = mul(state->projection, mul(view, model));
         state->u_mvp.set(mvp);
         state->u_color.set(colors[i % 3]);

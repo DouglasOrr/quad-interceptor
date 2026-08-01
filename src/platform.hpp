@@ -43,6 +43,7 @@ enum class Key : uint8_t {
     left, right, up, down,
     x, z, ctrl, comma, period,
     esc,
+    hash,
     count,
 };
 
@@ -55,6 +56,9 @@ struct Window {
 
     // Query a key's held state as of the most recent frame()
     bool held(Key k) const;
+
+    // Query whether a key was pressed (transition from not held to held) in the most recent frame()
+    bool pressed(Key k) const;
 
 private:
     struct State;

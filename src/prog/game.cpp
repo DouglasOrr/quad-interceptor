@@ -29,12 +29,16 @@ int main() {
         Drone::create({10.0f, 0.0f, 1.0f}),
         Drone::create({20.0f, 5.0f, 2.0f}),
     };
+    auto initial_state = state;
     Renderer renderer;
     Stopwatch stopwatch;
     float physics_time = 0.0f;
-
     while (window.frame()) {
-        copy_control(window, state.drones[0].control);
+        if (window.pressed(Key::hash)) {
+            state = initial_state;
+            physics_time = 0.0f;
+        }
+        copy_control(window, state.drones[0].control_m);
         physics_time = std::min(0.25f, physics_time + stopwatch.lap());
         while (physics_time >= Physics::dt) {
             Physics::tick(state);

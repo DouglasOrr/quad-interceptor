@@ -8,18 +8,17 @@
 
 ////////////////////////////////////////////////////////////////////////////////
 // State
+//
+// Default world frame; an '_m' suffix marks a model(body)-frame quantity.
 
 struct Drone {
-    // static properties
-    float mass;
-    Mat<3, 3> inv_inertia;  // (model)
+    inline static constexpr float height = 0.15f;
 
-    // dynamic state
     Vec<3> position;      // (world)
     Vec<3> velocity;      // (world)
     Quat orientation;     // (model -> world)
     Vec<3> ang_momentum;  // (world)
-    Vec<4> control;       // (right/left, forward/backward, up/down, clock/anticlock)
+    Vec<4> control_m;     // (right/left, forward/backward, up/down, clock/anticlock)
 
     static Drone create(Vec<3> position);
 };
