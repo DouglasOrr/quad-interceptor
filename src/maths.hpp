@@ -23,8 +23,8 @@ template <uint M, uint N>
 struct Mat {
     float data[M * N];  // column-major
 
-    float& operator[](uint row, uint col) { return data[col * N + row]; }
-    const float& operator[](uint row, uint col) const { return data[col * N + row]; }
+    float& operator[](uint row, uint col) { return data[col * M + row]; }
+    const float& operator[](uint row, uint col) const { return data[col * M + row]; }
 };
 
 using Mat4 = Mat<4, 4>;
