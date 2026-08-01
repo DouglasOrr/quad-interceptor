@@ -1,5 +1,6 @@
 #pragma once
 
+#include <format>
 #include <memory>
 #include <vector>
 
@@ -24,6 +25,7 @@ struct Drone {
 };
 
 struct GameState {
+    uint64 tick;
     std::vector<Drone> drones;  // with player = drones[0]
 };
 
@@ -49,3 +51,24 @@ private:
     struct State;
     std::unique_ptr<State> state;
 };
+
+///////////////////////////////////////////////////////////////////////////////
+// Utility
+
+#ifdef ENABLE_LOGGING
+#include <iostream>
+
+template <typename... Args>
+inline void print(const GameState& state,
+                  uint period,
+                  std::format_string<Args...> fmt,
+                  Args&&... args) {
+    if (state.tick % period == 0) {
+        std::print(std::cerr, "[{:06}] {}", state.tick,
+                   std::format(fmt, std::forward<Args>(args)...));
+    }
+}
+#else
+template <typename... Args>
+inline void print(const GameState&, uint, std::format_string<Args...>, Args&&...) {}
+#endif  // ENABLE_LOGGING
