@@ -138,11 +138,12 @@ struct Mesh {
 // Renderer impl
 
 // Scene constants.
+constexpr float FOV_DEGS = 100.0f;
 constexpr float FLOOR_HALF = 500.0f;  // floor spans +/-FLOOR_HALF on X/Y
 constexpr float GRID_STEP = 3.0f;
 constexpr float GRID_Z = 0.001f;  // slightly above floor to avoid z-fighting
 // constexpr Vec<3> CAM_OFFSET_VEC{0.5f, 0.0f, 0.0f};  // front (cockpit)
-constexpr Vec<3> CAM_OFFSET_VEC{-1.5f, 0.0f, 0.5f};  // chase (behind, slightly up)
+constexpr Vec<3> CAM_OFFSET_VEC{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
 // local -z (forward) with +y up; we want forward = drone +x, up = drone +z,
@@ -226,7 +227,7 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
 
-    state->projection = mat_perspective(3.14159f / 3.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+    state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 }
 
 Renderer::~Renderer() = default;
