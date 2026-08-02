@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include "game.hpp"
 
 namespace {
@@ -6,23 +8,32 @@ constexpr Vec<3> GRAVITY = {0.0f, 0.0f, -10.0f};
 
 // Drone
 constexpr float BODY_MASS = 1.0f;
-constexpr Mat3 DAMPING_M = mat_diag(0.2f, 0.2f, 0.4f);
+constexpr Mat3 DAMPING_M = mat_diag(0.2f, 0.2f, 0.5f);
 constexpr Mat3 BODY_INV_INERTIA_M = mat_diag(1.0f, 1.0f, 5.0f);
-constexpr float MOTOR_FORCE = 4.0f;
+constexpr float MOTOR_FORCE = 5.0f;
 constexpr std::array<Vec<3>, 4> MOTOR_OFFSETS_M = {{
     {{0.1f, 0.1f, 0.0f}},    // FL
     {{0.1f, -0.1f, 0.0f}},   // FR
     {{-0.1f, 0.1f, 0.0f}},   // BL
     {{-0.1f, -0.1f, 0.0f}},  // BR
 }};
-constexpr float MOTOR_TORQUE = 0.3f;
+constexpr float MOTOR_TORQUE = 0.2f;
 constexpr Mat3 ANG_DAMPING_M = mat_diag(0.4f, 0.4f, 0.4f);
 
-// Control
-constexpr auto C_FB = 0.5f;
-constexpr auto C_RL = 0.5f;
-constexpr auto C_ROT = 0.5f;
+// PID settings
+constexpr float MAX_RATE = 2.5f;  // commanded pitch/roll rate, rad/s
+constexpr float PID_KP = 5.0f;
+constexpr float PID_KI = 3.0f;
+constexpr float PID_KD = 0.0f;
 }  // namespace
+
+float Pid::operator()(float error, float dt) {
+    integral += error * dt;
+    integral = std::clamp(integral, -10.0f, 10.0f);  // anti-windup
+    float delta = (error - prev) / dt;
+    prev = error;
+    return PID_KP * error + PID_KI * integral + PID_KD * delta;
+}
 
 Drone Drone::create(Vec<3> position) {
     Drone d;
@@ -40,6 +51,7 @@ void Physics::tick(GameState& state) {
         auto& d = state.drones[d_index];
         auto R = mat_from(d.orientation);
         auto Rt = transpose(R);
+        auto ang_vel_m = mul(BODY_INV_INERTIA_M, mul(Rt, d.ang_momentum));  // actual rates (model)
 
         // Collisions (floor)
         if (d.position[2] - Drone::height <= 0.0f) {
@@ -57,21 +69,23 @@ void Physics::tick(GameState& state) {
         }
 
         // Motor controls
-        auto up = std::max(0.0f, d.control_m[2]);  // total
+        auto up = std::max(0.0f, d.control_m[2]);
         auto cFL = up, cFR = up, cBL = up, cBR = up;
 
         auto cw = d.control_m[3];  // (FL + BR) - (FR + BL)
-        cFL += C_ROT * cw;
-        cFR += C_ROT * -cw;
-        cBL += C_ROT * -cw;
-        cBR += C_ROT * cw;
+        cFL += cw;
+        cFR += -cw;
+        cBL += -cw;
+        cBR += cw;
 
-        auto rl = d.control_m[0];
-        auto fb = d.control_m[1];
-        cFL += C_FB * -fb + C_RL * rl;
-        cFR += C_FB * -fb + C_RL * -rl;
-        cBL += C_FB * fb + C_RL * rl;
-        cBR += C_FB * fb + C_RL * -rl;
+        // Pitch/roll rates from a PID tracking the commanded rate (control in rad/s).
+        auto rl = std::clamp(d.pid_roll(MAX_RATE * d.control_m[0] - ang_vel_m[0], dt), -1.0f, 1.0f);
+        auto fb =
+            std::clamp(d.pid_pitch(MAX_RATE * d.control_m[1] - ang_vel_m[1], dt), -1.0f, 1.0f);
+        cFL += -fb + rl;
+        cFR += -fb + -rl;
+        cBL += fb + rl;
+        cBR += fb + -rl;
 
         // Forces
         auto force = BODY_MASS * GRAVITY;
@@ -89,7 +103,6 @@ void Physics::tick(GameState& state) {
         // Dynamics
         d.velocity += (dt / BODY_MASS) * force;
         d.position += dt * d.velocity;
-        auto ang_vel_m = mul(BODY_INV_INERTIA_M, mul(Rt, d.ang_momentum));
         auto ang_vel = mul(R, ang_vel_m);
         d.ang_momentum += dt * (torque - mul(R, mul(ANG_DAMPING_M, ang_vel_m)));
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));

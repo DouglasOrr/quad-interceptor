@@ -11,14 +11,25 @@
 //
 // Default world frame; an '_m' suffix marks a model(body)-frame quantity.
 
+struct Pid {
+    float integral = 0.0f;
+    float prev = 0.0f;
+    float operator()(float error, float dt);
+};
+
 struct Drone {
     inline static constexpr float height = 0.15f;
 
+    // State
     Vec<3> position;      // (world)
     Vec<3> velocity;      // (world)
     Quat orientation;     // (model -> world)
     Vec<3> ang_momentum;  // (world)
-    Vec<4> control_m;     // (right/left, forward/backward, up/down, clock/anticlock)
+
+    // Control
+    Vec<4> control_m;  // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]
+    Pid pid_roll;
+    Pid pid_pitch;
 
     static Drone create(Vec<3> position);
 };
