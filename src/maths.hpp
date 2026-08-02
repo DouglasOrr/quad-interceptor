@@ -4,6 +4,7 @@
 #include <concepts>
 
 using uint = unsigned int;
+using int64 = long long;
 using uint64 = unsigned long long;
 
 inline float sign(float x) {

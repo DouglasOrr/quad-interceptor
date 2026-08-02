@@ -34,16 +34,29 @@ struct Drone {
     static Drone create(Vec<3> position);
 };
 
+struct Cell {
+    float height;  // 0=street
+    uint64 hash;
+};
+
+struct City {
+    inline static constexpr uint cell_size = 30;
+
+    int64 seed;
+    Cell operator()(int64 x, int64 y) const;  // (x, y) are cell coordinates
+};
+
 struct GameState {
     uint64 tick;
     std::vector<Drone> drones;  // with player = drones[0]
+    City city;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Physics
 
 struct Physics {
-    inline static constexpr float dt = 1e-3f;  // seconds per tick
+    inline static constexpr float dt = 1e-3f;  // seconds
 
     static void tick(GameState& state);
 };
@@ -74,7 +87,7 @@ inline void print(const GameState& state,
                   std::format_string<Args...> fmt,
                   Args&&... args) {
     if (state.tick % period == 0) {
-        std::print(std::cerr, "[{:06}] {}", state.tick,
+        std::print(std::cerr, "[{:06}] {}\n", state.tick,
                    std::format(fmt, std::forward<Args>(args)...));
     }
 }

@@ -3,14 +3,17 @@
 #include "game.hpp"
 
 namespace {
+////////////////////////////////////////////////////////////////////////////////
+// Settings
+
 constexpr Vec<3> UP = {0.0f, 0.0f, 1.0f};
 constexpr Vec<3> GRAVITY = {0.0f, 0.0f, -10.0f};
 
 // Drone
 constexpr float BODY_MASS = 1.0f;
-constexpr Mat3 DAMPING_M = mat_diag(0.2f, 0.2f, 0.5f);
+constexpr Mat3 DAMPING_M = mat_diag(0.2f, 0.2f, 1.0f);
 constexpr Mat3 BODY_INV_INERTIA_M = mat_diag(1.0f, 1.0f, 5.0f);
-constexpr float MOTOR_FORCE = 5.0f;
+constexpr float MOTOR_FORCE = 6.0f;
 constexpr std::array<Vec<3>, 4> MOTOR_OFFSETS_M = {{
     {{0.1f, 0.1f, 0.0f}},    // FL
     {{0.1f, -0.1f, 0.0f}},   // FR
@@ -20,11 +23,31 @@ constexpr std::array<Vec<3>, 4> MOTOR_OFFSETS_M = {{
 constexpr float MOTOR_TORQUE = 0.2f;
 constexpr Mat3 ANG_DAMPING_M = mat_diag(0.4f, 0.4f, 0.4f);
 
-// PID settings
+// Drone control - PID settings
 constexpr float MAX_RATE = 2.5f;  // commanded pitch/roll rate, rad/s
 constexpr float PID_KP = 5.0f;
 constexpr float PID_KI = 3.0f;
 constexpr float PID_KD = 0.0f;
+
+// City
+constexpr uint CITY_BLOCK_SIZE = 5;
+constexpr Vec<2> CITY_BUILDING_HEIGHT_RANGE = {10.0f, 100.0f};
+
+////////////////////////////////////////////////////////////////////////////////
+// Utilities
+
+int64 floordiv(int64 a, int64 b) {
+    return a >= 0 ? a / b : (a - (b - 1)) / b;
+}
+
+uint64 hash_mix(uint64 x) {
+    x ^= x >> 32;
+    x *= 0xd6e8feb86659fd93ULL;
+    x ^= x >> 32;
+    x *= 0xd6e8feb86659fd93ULL;
+    x ^= x >> 32;
+    return x;
+}
 }  // namespace
 
 float Pid::operator()(float error, float dt) {
@@ -33,6 +56,21 @@ float Pid::operator()(float error, float dt) {
     float delta = (error - prev) / dt;
     prev = error;
     return PID_KP * error + PID_KI * integral + PID_KD * delta;
+}
+
+Cell City::operator()(int64 x, int64 y) const {
+    int64 ox = x - floordiv(x, int64(CITY_BLOCK_SIZE)) * int64(CITY_BLOCK_SIZE);
+    int64 oy = y - floordiv(y, int64(CITY_BLOCK_SIZE)) * int64(CITY_BLOCK_SIZE);
+
+    uint64 h = hash_mix(uint64(seed) ^ (uint64(x) * 0xb5297a4dULL ^ uint64(y) * 0x68e31da4ULL));
+
+    float height = 0.0f;  // street
+    if (ox != 0 && oy != 0) {
+        float u = (h & 0xffffff) * (1.0f / float(1 << 24));
+        height = CITY_BUILDING_HEIGHT_RANGE[0] +
+                 u * (CITY_BUILDING_HEIGHT_RANGE[1] - CITY_BUILDING_HEIGHT_RANGE[0]);
+    }
+    return {height, h};
 }
 
 Drone Drone::create(Vec<3> position) {
@@ -106,5 +144,9 @@ void Physics::tick(GameState& state) {
         auto ang_vel = mul(R, ang_vel_m);
         d.ang_momentum += dt * (torque - mul(R, mul(ANG_DAMPING_M, ang_vel_m)));
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));
+
+        // if (d_index == 0) {
+        //     print(state, 1000, "{} {} {}\n", d.position[0], d.position[1], d.position[2]);
+        // }
     }
 }

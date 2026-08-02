@@ -22,3 +22,4 @@ examples/<DD>-<name> -- standalone examples/demos
 - C++20, -Wall -Wextra -Werror, clang-format.
 - Prefer concise code. Inline implementations where possible. Outline for reuse or clarity, where it reduces complexity.
 - Simple and direct over abstract and general.
+- Use comments sparingly, only when intent is otherwise unclear, and keep them brief.

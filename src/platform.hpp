@@ -28,9 +28,12 @@
     OP(void, glDeleteVertexArrays, GLsizei, GLuint*)                                        \
     OP(GLint, glGetUniformLocation, GLuint, const GLchar*)                                  \
     OP(void, glUniformMatrix4fv, GLint, GLsizei, GLboolean, const GLfloat*)                 \
+    OP(void, glUniform1f, GLint, GLfloat)                                                  \
     OP(void, glUniform3fv, GLint, GLsizei, const GLfloat*)                                  \
     OP(void, glGetProgramiv, GLuint, GLenum, GLint*)                                        \
-    OP(void, glGetProgramInfoLog, GLuint, GLsizei, GLsizei*, GLchar*)
+    OP(void, glGetProgramInfoLog, GLuint, GLsizei, GLsizei*, GLchar*)                       \
+    OP(void, glDrawArraysInstanced, GLenum, GLint, GLsizei, GLsizei)                        \
+    OP(void, glVertexAttribDivisor, GLuint, GLuint)
 
 #define DECLARE_EXTERN(ret, name, ...)            \
     typedef ret(APIENTRY* name##_t)(__VA_ARGS__); \
