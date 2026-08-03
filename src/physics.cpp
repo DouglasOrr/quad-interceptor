@@ -147,7 +147,7 @@ void Physics::tick(GameState& state) {
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));
 
         // if (d_index == 0) {
-        //     print(state, 1000, "{} {} {}\n", d.position[0], d.position[1], d.position[2]);
+        //     print(state, 1000, "pos:", d.position[0], d.position[1], d.position[2]);
         // }
     }
 }

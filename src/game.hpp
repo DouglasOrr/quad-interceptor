@@ -1,6 +1,6 @@
 #pragma once
 
-#include <format>
+#include <iostream>
 #include <memory>
 #include <vector>
 
@@ -78,20 +78,11 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 // Utility
 
-#ifdef ENABLE_LOGGING
-#include <iostream>
-
 template <typename... Args>
-inline void print(const GameState& state,
-                  uint period,
-                  std::format_string<Args...> fmt,
-                  Args&&... args) {
+inline void print(const GameState& state, uint period, const Args&... args) {
     if (state.tick % period == 0) {
-        std::print(std::cerr, "[{:06}] {}\n", state.tick,
-                   std::format(fmt, std::forward<Args>(args)...));
+        std::cerr << '[' << state.tick << "]";
+        ((std::cerr << ' ' << args), ...);
+        std::cerr << '\n';
     }
 }
-#else
-template <typename... Args>
-inline void print(const GameState&, uint, std::format_string<Args...>, Args&&...) {}
-#endif  // ENABLE_LOGGING
