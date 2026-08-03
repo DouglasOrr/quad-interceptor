@@ -147,6 +147,7 @@ constexpr float FLOOR_HALF = 500.0f;  // floor spans +/-FLOOR_HALF on X/Y
 constexpr float GRID_STEP = 3.0f;
 constexpr int CITY_RADIUS = 60;   // cells rendered around the player in each direction
 constexpr float GRID_Z = 0.001f;  // slightly above floor to avoid z-fighting
+constexpr Vec<3> LIGHT_DIR{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
 // constexpr Vec<3> CAM_OFFSET_VEC{0.5f, 0.0f, 0.0f};  // front (cockpit)
 constexpr Vec<3> CAM_OFFSET_VEC{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
 
@@ -184,6 +185,8 @@ struct Renderer::State {
     GlProgram city_program;
     Uniform u_city_mvp;
     Uniform u_city_cell_size;
+    Uniform u_city_light_dir;
+    Uniform u_city_cam_pos;
 
     Mesh drone;
     Mesh floor;
@@ -228,23 +231,44 @@ layout(location=1) in vec3 inst_world;   // x, y, height
 layout(location=2) in vec3 inst_color;
 uniform mat4 u_mvp;
 uniform float u_city_cell_size;
+out vec3 v_world;
 out vec3 v_color;
 void main(){
   vec3 scale = vec3(u_city_cell_size, u_city_cell_size, inst_world.z);
   vec3 world = vec3(inst_world.x, inst_world.y, 0.0);
-  gl_Position = u_mvp * vec4(world + scale * (pos + 0.5), 1.0);
+  vec3 p = world + scale * (pos + 0.5);
+  gl_Position = u_mvp * vec4(p, 1.0);
+  v_world = p;
   v_color = inst_color;
 }
 )";
     const char* city_f_src = R"(
 #version 330 core
+in vec3 v_world;
 in vec3 v_color;
 out vec4 frag;
-void main(){ frag = vec4(v_color, 1.0); }
+uniform vec3 u_light_dir;
+uniform vec3 u_cam_pos;
+const vec3 u_ambient = vec3(0.22);
+const vec3 u_diffuse = vec3(0.70);
+const vec3 u_specular = vec3(0.30);
+const float u_shininess = 32.0;
+void main(){
+  // Flat per-face normal, recovered from fragment derivatives of world position.
+  vec3 N = normalize(cross(dFdx(v_world), dFdy(v_world)));
+  vec3 L = normalize(u_light_dir);
+  vec3 V = normalize(u_cam_pos - v_world);
+  vec3 H = normalize(L + V);
+  float diff = max(dot(N, L), 0.0);
+  float spec = diff > 0.0 ? pow(max(dot(N, H), 0.0), u_shininess) : 0.0;
+  frag = vec4(v_color * (u_ambient + u_diffuse * diff) + u_specular * spec, 1.0);
+}
 )";
     state->city_program = GlProgram(city_v_src, city_f_src);
     state->u_city_mvp = state->city_program.uniform("u_mvp");
     state->u_city_cell_size = state->city_program.uniform("u_city_cell_size");
+    state->u_city_light_dir = state->city_program.uniform("u_light_dir");
+    state->u_city_cam_pos = state->city_program.uniform("u_cam_pos");
 
     // City instanced draw setup: cube geometry at loc 0, per-instance data at 1 & 2.
     glBindBuffer(GL_ARRAY_BUFFER, state->city_cube_vbo.id);
@@ -351,6 +375,8 @@ void Renderer::draw(const GameState& s) {
         state->city_program.use();
         state->u_city_mvp.set(mvp);
         state->u_city_cell_size.set(float(city.cell_size));
+        state->u_city_light_dir.set(LIGHT_DIR);
+        state->u_city_cam_pos.set(eye);
         glBindVertexArray(state->city_vao.id);
         glDrawArraysInstanced(GL_TRIANGLES, 0, 36, state->city_count);
         glBindVertexArray(0);
