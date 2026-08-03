@@ -24,10 +24,10 @@ int main() {
     Window window("Small Game", 1920, 1080);
 
     GameState state;
+    auto C = float(City::cell_size);
     state.drones = {
-        Drone::create({0.0f, 0.0f, 1.0f}),
-        Drone::create({10.0f, 0.0f, 1.0f}),
-        Drone::create({20.0f, 5.0f, 2.0f}),
+        Drone::create({0.0f, C, 1.0f}),
+        Drone::create({5 * C, C, 1.0f}),
     };
     auto initial_state = state;
     Renderer renderer;

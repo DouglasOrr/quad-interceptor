@@ -219,8 +219,8 @@ void main(){ frag = vec4(u_color, 1.0); }
     state->u_color = state->program.uniform("u_color");
     state->drone = Mesh(CUBE, sizeof(CUBE), 36);
 
-    // Per-instance city program: each instance carries world x/y + height (loc 1)
-    // and a grey shade (loc 2); the unit cube is scaled/raised in the vertex shader.
+    // Per-instance city program: each instance carries the cell corner world x/y + height
+    // (loc 1) and a grey shade (loc 2); the unit cube is scaled/raised from that corner.
     const char* city_v_src = R"(
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -231,8 +231,8 @@ uniform float u_city_cell_size;
 out vec3 v_color;
 void main(){
   vec3 scale = vec3(u_city_cell_size, u_city_cell_size, inst_world.z);
-  vec3 world = vec3(inst_world.x, inst_world.y, inst_world.z * 0.5);
-  gl_Position = u_mvp * vec4(world + scale * pos, 1.0);
+  vec3 world = vec3(inst_world.x, inst_world.y, 0.0);
+  gl_Position = u_mvp * vec4(world + scale * (pos + 0.5), 1.0);
   v_color = inst_color;
 }
 )";

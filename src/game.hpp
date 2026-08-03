@@ -40,7 +40,7 @@ struct Cell {
 };
 
 struct City {
-    inline static constexpr uint cell_size = 30;
+    inline static constexpr uint cell_size = 15;
 
     int64 seed;
     Cell operator()(int64 x, int64 y) const;  // (x, y) are cell coordinates

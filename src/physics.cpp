@@ -30,7 +30,8 @@ constexpr float PID_KI = 3.0f;
 constexpr float PID_KD = 0.0f;
 
 // City
-constexpr uint CITY_BLOCK_SIZE = 5;
+constexpr uint CITY_BLOCK_SIZE = 10;
+constexpr uint CITY_STREET_SIZE = 2;
 constexpr Vec<2> CITY_BUILDING_HEIGHT_RANGE = {10.0f, 100.0f};
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -65,7 +66,7 @@ Cell City::operator()(int64 x, int64 y) const {
     uint64 h = hash_mix(uint64(seed) ^ (uint64(x) * 0xb5297a4dULL ^ uint64(y) * 0x68e31da4ULL));
 
     float height = 0.0f;  // street
-    if (ox != 0 && oy != 0) {
+    if (CITY_STREET_SIZE <= ox && CITY_STREET_SIZE <= oy) {
         float u = (h & 0xffffff) * (1.0f / float(1 << 24));
         height = CITY_BUILDING_HEIGHT_RANGE[0] +
                  u * (CITY_BUILDING_HEIGHT_RANGE[1] - CITY_BUILDING_HEIGHT_RANGE[0]);
