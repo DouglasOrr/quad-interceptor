@@ -16,6 +16,7 @@ examples/<DD>-<name> -- standalone examples/demos
 ## Instructions
 
 - Leave git edit commands to the user, except where explicitly prompted.
+- If asked to use a worktree, put it in `./agents/<name>`
 
 ## Style
 
