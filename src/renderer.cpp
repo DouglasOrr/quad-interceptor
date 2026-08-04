@@ -4,9 +4,12 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -40,6 +43,22 @@ struct GlVertexArray {
     GlVertexArray& operator=(const GlVertexArray&) = delete;
     GlVertexArray(GlVertexArray&& o) noexcept : id(o.id) { o.id = 0; }
     GlVertexArray& operator=(GlVertexArray&& o) noexcept {
+        if (this != &o) std::swap(id, o.id);
+        return *this;
+    }
+};
+
+struct GlTexture {
+    GLuint id = 0;
+
+    GlTexture() { glGenTextures(1, &id); }
+    ~GlTexture() {
+        if (id) glDeleteTextures(1, &id);
+    }
+    GlTexture(const GlTexture&) = delete;
+    GlTexture& operator=(const GlTexture&) = delete;
+    GlTexture(GlTexture&& o) noexcept : id(o.id) { o.id = 0; }
+    GlTexture& operator=(GlTexture&& o) noexcept {
         if (this != &o) std::swap(id, o.id);
         return *this;
     }
@@ -188,6 +207,18 @@ struct Renderer::State {
     Uniform u_city_light_dir;
     Uniform u_city_cam_pos;
 
+    GlProgram text_program;
+    Uniform u_text_mvp;
+    Uniform u_text_color;
+    GlTexture font_tex;
+    GlVertexArray text_vao;
+    GlBuffer text_vbo;
+    std::vector<float> text_verts;
+    Font font;
+    uint glyph_cols = 0;
+    uint glyph_rows = 0;
+    std::array<int, 256> glyph_map;  // byte value -> glyph index, or -1
+
     Mesh drone;
     Mesh floor;
     Mesh grid;
@@ -313,6 +344,68 @@ void main(){
     state->grid =
         Mesh(grid.data(), grid.size() * sizeof(float), static_cast<GLsizei>(grid.size() / 3));
 
+    // Text: texture-sampled glyph quads onto an orthographic overlay.
+    const char* text_v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+layout(location=1) in vec2 uv;
+uniform mat4 u_mvp;
+out vec2 v_uv;
+void main(){ gl_Position = u_mvp * vec4(pos, 0.0, 1.0); v_uv = uv; }
+)";
+    const char* text_f_src = R"(
+#version 330 core
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec3 u_color;
+out vec4 frag;
+void main(){ float a = texture(u_tex, v_uv).r; frag = vec4(u_color, a); }
+)";
+    state->text_program = GlProgram(text_v_src, text_f_src);
+    state->u_text_mvp = state->text_program.uniform("u_mvp");
+    state->u_text_color = state->text_program.uniform("u_color");
+
+    // Unpack the 1-bit atlas into a sheet texture (one glyph per cell).
+    state->font = Font::load();
+    const Font& font = state->font;
+    state->glyph_map.fill(-1);
+    for (size_t gi = 0; gi < font.glyphs.size(); ++gi)
+        state->glyph_map[font.glyphs[gi].ch] = int(gi);
+    while (state->glyph_cols * state->glyph_cols < font.glyphs.size())
+        ++state->glyph_cols;
+    state->glyph_rows = (font.glyphs.size() + state->glyph_cols - 1) / state->glyph_cols;
+    const uint sheet_w = state->glyph_cols * font.width;
+    const uint sheet_h = state->glyph_rows * font.height;
+    std::vector<uint8_t> sheet(sheet_w * sheet_h, 0);
+    for (size_t gi = 0; gi < font.glyphs.size(); ++gi) {
+        const std::vector<uint8_t>& data = font.glyphs[gi].data;
+        const uint cell_col = uint(gi) % state->glyph_cols;
+        const uint cell_row = uint(gi) / state->glyph_cols;
+        for (uint y = 0; y < font.height; ++y) {
+            for (uint x = 0; x < font.width; ++x) {
+                sheet[(cell_row * font.height + y) * sheet_w + cell_col * font.width + x] =
+                    data[y * font.width + x];
+            }
+        }
+    }
+    glBindTexture(GL_TEXTURE_2D, state->font_tex.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, sheet_w, sheet_h, 0, GL_RED, GL_UNSIGNED_BYTE,
+                 sheet.data());
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindVertexArray(state->text_vao.id);
+    glBindBuffer(GL_ARRAY_BUFFER, state->text_vbo.id);
+    glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glBindVertexArray(0);
+
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
 
@@ -321,7 +414,7 @@ void main(){
 
 Renderer::~Renderer() = default;
 
-void Renderer::draw(const GameState& s) {
+void Renderer::draw(const GameState& s, float fps) {
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
@@ -391,4 +484,78 @@ void Renderer::draw(const GameState& s) {
         state->u_color.set(i == 0 ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f});
         state->drone.draw(GL_TRIANGLES);
     }
+
+    auto draw_text = [this](float x, float top_y, float scale, const char* text, Vec<3> color) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float vp_width = float(vp[2]);
+        const float vp_height = float(vp[3]);
+
+        const Font& font = state->font;
+        const float cell_w = font.width * scale;
+        const float cell_h = font.height * scale;
+        const float advance = font.width * scale;
+        state->text_verts.clear();
+        std::array<std::array<float, 4>, 4> quad{};  // (x, y, u, v)
+        for (size_t ti = 0; text[ti] != '\0'; ++ti) {
+            const int i = state->glyph_map[static_cast<unsigned char>(text[ti])];
+            if (i < 0) continue;
+            const uint col = uint(i) % state->glyph_cols;
+            const uint row = uint(i) / state->glyph_cols;
+            const float x0 = x + float(ti) * advance;
+            const float x1 = x0 + cell_w;
+            const float u0 = float(col) / float(state->glyph_cols);
+            const float u1 = float(col + 1) / float(state->glyph_cols);
+            const float vtop = float(row) / float(state->glyph_rows);
+            const float vbot = float(row + 1) / float(state->glyph_rows);
+            quad[0] = {x0, top_y + cell_h, u0, vtop};
+            quad[1] = {x1, top_y + cell_h, u1, vtop};
+            quad[2] = {x1, top_y, u1, vbot};
+            quad[3] = {x0, top_y, u0, vbot};
+            const int tris[6] = {0, 1, 2, 0, 2, 3};
+            for (int tri : tris) {
+                auto& q = quad[tri];
+                state->text_verts.insert(state->text_verts.end(), {q[0], q[1], q[2], q[3]});
+            }
+        }
+        if (state->text_verts.empty()) return;
+
+        glBindBuffer(GL_ARRAY_BUFFER, state->text_vbo.id);
+        glBufferData(GL_ARRAY_BUFFER,
+                     static_cast<GLsizeiptr>(state->text_verts.size() * sizeof(float)),
+                     state->text_verts.data(), GL_DYNAMIC_DRAW);
+
+        state->text_program.use();
+        state->u_text_mvp.set(mat_ortho(0.0f, vp_width, 0.0f, vp_height));
+        state->u_text_color.set(color);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, state->font_tex.id);
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBindVertexArray(state->text_vao.id);
+        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(state->text_verts.size() / 4));
+        glBindVertexArray(0);
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+
+        state->program.use();
+        glBindTexture(GL_TEXTURE_2D, 0);
+    };
+
+    char label[32];
+    std::snprintf(label, sizeof(label), "%d FPS", int(fps));
+
+    // Right-align to the top-right corner.
+    const float scale = 1.5f;
+    const float margin = 8.0f;
+    GLint vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
+    const float vp_width = float(vp[2]);
+    const float vp_height = float(vp[3]);
+    const float text_w = float(std::strlen(label)) * state->font.width * scale;
+    const float x = vp_width - margin - text_w;
+    const float top_y = vp_height - margin - state->font.height * scale;
+    draw_text(x, top_y, scale, label, Vec<3>{0.7f, 0.8f, 1.0f});
 }

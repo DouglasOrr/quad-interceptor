@@ -2,6 +2,24 @@
 #include "platform.hpp"
 
 namespace {
+// Measures a smoothed frames-per-second from per-frame dt samples.
+struct Fps {
+    constexpr static float period = 0.5f;  // seconds
+    float value = 0.0f;
+    float window = 0.0f;
+    int frames = 0;
+
+    void tick(float dt) {
+        ++frames;
+        window += dt;
+        if (window >= period) {
+            value = float(frames) / window;
+            window = 0.0f;
+            frames = 0;
+        }
+    }
+};
+
 void copy_control(const Window& w, Vec<4>& c) {
     auto f = [](bool b) { return b ? 1.0f : 0.0f; };
     c = {};
@@ -33,17 +51,20 @@ int main() {
     Renderer renderer;
     Stopwatch stopwatch;
     float physics_time = 0.0f;
+    Fps fps;
     while (window.frame()) {
+        const float dt = stopwatch.lap();
         if (window.pressed(Key::hash)) {
             state = initial_state;
             physics_time = 0.0f;
         }
         copy_control(window, state.drones[0].control_m);
-        physics_time = std::min(0.25f, physics_time + stopwatch.lap());
+        physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
             Physics::tick(state);
             physics_time -= Physics::dt;
         }
-        renderer.draw(state);
+        fps.tick(dt);
+        renderer.draw(state, fps.value);
     }
 }

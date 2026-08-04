@@ -110,6 +110,17 @@ inline Mat4 mat_perspective(float fov_y, float aspect, float z_near, float z_far
     return m;
 }
 
+inline constexpr Mat4 mat_ortho(float left, float right, float bottom, float top) {
+    Mat4 m{};
+    m[0, 0] = 2.0f / (right - left);
+    m[1, 1] = 2.0f / (top - bottom);
+    m[2, 2] = -1.0f;
+    m[0, 3] = -(right + left) / (right - left);
+    m[1, 3] = -(top + bottom) / (top - bottom);
+    m[3, 3] = 1.0f;
+    return m;
+}
+
 template <typename... Fs>
     requires(... && std::convertible_to<Fs, float>)
 inline constexpr auto mat_diag(Fs... fs) {

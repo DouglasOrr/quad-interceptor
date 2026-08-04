@@ -1,10 +1,21 @@
 #pragma once
 
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <vector>
 
 #include "maths.hpp"
+
+// Always-on assertion; overrides the standard `assert` so it stays active in
+// release builds (which define NDEBUG).
+[[noreturn]] inline void gg_assert_fail(const char* expr, const char* file, int line) {
+    std::fprintf(stderr, "assertion failed: %s (%s:%d)\n", expr, file, line);
+    std::abort();
+}
+#define gassert(cond) ((cond) ? (void)0 : gg_assert_fail(#cond, __FILE__, __LINE__))
 
 ////////////////////////////////////////////////////////////////////////////////
 // State
@@ -62,13 +73,28 @@ struct Physics {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+// Assets
+
+struct Font {
+    struct Glyph {
+        uint8_t ch;
+        std::vector<uint8_t> data;  // width*height bytes, each 0 or 255
+    };
+    uint width;
+    uint height;
+    std::vector<Glyph> glyphs;
+
+    static Font load();
+};
+
+///////////////////////////////////////////////////////////////////////////////
 // Renderer
 
 struct Renderer {
     Renderer();
     ~Renderer();
 
-    void draw(const GameState& state);
+    void draw(const GameState& state, float fps);
 
 private:
     struct State;

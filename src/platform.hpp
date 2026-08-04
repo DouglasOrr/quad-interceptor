@@ -28,12 +28,13 @@
     OP(void, glDeleteVertexArrays, GLsizei, GLuint*)                                        \
     OP(GLint, glGetUniformLocation, GLuint, const GLchar*)                                  \
     OP(void, glUniformMatrix4fv, GLint, GLsizei, GLboolean, const GLfloat*)                 \
-    OP(void, glUniform1f, GLint, GLfloat)                                                  \
+    OP(void, glUniform1f, GLint, GLfloat)                                                   \
     OP(void, glUniform3fv, GLint, GLsizei, const GLfloat*)                                  \
     OP(void, glGetProgramiv, GLuint, GLenum, GLint*)                                        \
     OP(void, glGetProgramInfoLog, GLuint, GLsizei, GLsizei*, GLchar*)                       \
     OP(void, glDrawArraysInstanced, GLenum, GLint, GLsizei, GLsizei)                        \
-    OP(void, glVertexAttribDivisor, GLuint, GLuint)
+    OP(void, glVertexAttribDivisor, GLuint, GLuint)                                         \
+    OP(void, glUniform1i, GLint, GLint)
 
 #define DECLARE_EXTERN(ret, name, ...)            \
     typedef ret(APIENTRY* name##_t)(__VA_ARGS__); \
@@ -42,9 +43,24 @@ FOREACH_GL_FUNCTION(DECLARE_EXTERN)
 #undef DECLARE_EXTERN
 
 enum class Key : uint8_t {
-    w, a, s, d, q, e, c, space, shift,
-    left, right, up, down,
-    x, z, ctrl, comma, period,
+    w,
+    a,
+    s,
+    d,
+    q,
+    e,
+    c,
+    space,
+    shift,
+    left,
+    right,
+    up,
+    down,
+    x,
+    z,
+    ctrl,
+    comma,
+    period,
     esc,
     hash,
     count,

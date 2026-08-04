@@ -61,12 +61,22 @@ CXXFLAGS_VARIANT = {
 }
 
 THIRD_PARTY = {
-    "doctest": "https://github.com/doctest/doctest/releases/download/v2.4.11/doctest.h"
+    "doctest": "https://github.com/doctest/doctest/releases/download/v2.4.11/doctest.h",
+    "kode-mono": (
+        "https://raw.githubusercontent.com/isaozler/kode-mono/master/fonts/ttf/KodeMono-Regular.ttf"
+    ),
 }
 
 
 def _generate_build_ninja(variant: str) -> str:
     lines: list[str] = []
+
+    make_font = ROOT / "tools" / "make_font.py"
+    lines.append("rule font")
+    lines.append(f"  command = uv run {make_font} -o $out")
+    lines.append("  description = FONT $out")
+    lines.append("  restat = 1")
+    lines.append("")
 
     lines.append("rule cxx")
     lines.append(f"  command = {CXX} $cflags -c $in -o $out")
@@ -83,9 +93,14 @@ def _generate_build_ninja(variant: str) -> str:
     lines.append("  description = LINK $out")
     lines.append("")
 
+    lines.append(f"build gen/font_data.cpp: font {make_font}")
+    lines.append("")
+
+    cpps = sorted(Path("src").rglob("*.cpp"))
+    cpps += [Path("gen/font_data.cpp")]
     obj_core, obj_prog, obj_test = [], [], []
-    for cpp in sorted(Path("src").rglob("*.cpp")):
-        obj = Path("obj") / cpp.relative_to("src").with_suffix(".o")
+    for cpp in cpps:
+        obj = Path("obj") / Path(*cpp.parts[1:]).with_suffix(".o")
         cxxflags = f"{CXXFLAGS} {CXXFLAGS_VARIANT[variant]}"
         lines.append(f"build {obj}: cxx {cpp}")
         lines.append(f"  cflags = {cxxflags} -MMD -MF {obj}.d")
