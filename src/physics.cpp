@@ -74,6 +74,33 @@ Cell City::operator()(int64 x, int64 y) const {
     return {height, h};
 }
 
+namespace {
+// Test if a sphere at p with radius r touches any building
+bool hits_building(const City& city, Vec<3> p, float r) {
+    // Find the subgrid of cells that overlap the sphere footprint
+    constexpr float cs = float(City::cell_size);
+    const int64 cx0 = floordiv(int64(std::floor(p[0] - r)), int64(cs));
+    const int64 cx1 = floordiv(int64(std::floor(p[0] + r)), int64(cs));
+    const int64 cy0 = floordiv(int64(std::floor(p[1] - r)), int64(cs));
+    const int64 cy1 = floordiv(int64(std::floor(p[1] + r)), int64(cs));
+    for (int64 cy = cy0; cy <= cy1; ++cy) {
+        for (int64 cx = cx0; cx <= cx1; ++cx) {
+            float h = city(cx, cy).height;
+            if (h <= 0.0f) continue;
+            // Closest point on the building AABB to the sphere centre
+            Vec<3> q = {
+                std::clamp(p[0], float(cx) * cs, float(cx + 1) * cs),
+                std::clamp(p[1], float(cy) * cs, float(cy + 1) * cs),
+                std::clamp(p[2], 0.0f, h),
+            };
+            Vec<3> d = q - p;
+            if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < r * r) return true;
+        }
+    }
+    return false;
+}
+}  // namespace
+
 Drone Drone::create(Vec<3> position) {
     Drone d;
     d.position = position;
@@ -91,6 +118,12 @@ void Physics::tick(GameState& state) {
         auto R = mat_from(d.orientation);
         auto Rt = transpose(R);
         auto ang_vel_m = mul(BODY_INV_INERTIA_M, mul(Rt, d.ang_momentum));  // actual rates (model)
+
+        // Collisions (building)
+        if (!d.alive || hits_building(state.city, d.position, Drone::radius)) {
+            d.alive = false;
+            continue;
+        }
 
         // Collisions (floor)
         if (d.position[2] - Drone::height <= 0.0f) {

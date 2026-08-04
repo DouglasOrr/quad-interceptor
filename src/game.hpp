@@ -30,12 +30,14 @@ struct Pid {
 
 struct Drone {
     inline static constexpr float height = 0.15f;
+    inline static constexpr float radius = 0.45f;
 
     // State
     Vec<3> position;      // (world)
     Vec<3> velocity;      // (world)
     Quat orientation;     // (model -> world)
     Vec<3> ang_momentum;  // (world)
+    bool alive = true;
 
     // Control
     Vec<4> control_m;  // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]

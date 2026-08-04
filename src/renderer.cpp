@@ -472,7 +472,6 @@ void main(){ float a = texture(u_tex, v_uv).r; frag = vec4(u_color, a); }
     state->u_text_mvp = state->text_program.uniform("u_mvp");
     state->u_text_color = state->text_program.uniform("u_color");
 
-
     state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
     // Default state
@@ -539,7 +538,9 @@ void Renderer::draw(const GameState& s, float fps) {
     state->program.use();
     for (size_t i = 0; i < s.drones.size(); ++i) {
         const Drone& d = s.drones[i];
-        Mat4 model = mul(mat_from(d.orientation, d.position), mat_diag(1, 1, Drone::height, 1));
+        auto size = 2 * Drone::radius * 1.1f;
+        Mat4 model =
+            mul(mat_from(d.orientation, d.position), mat_diag(size, size, Drone::height, 1));
         Mat4 mvp = mul(state->projection, mul(view, model));
         state->u_mvp.set(mvp);
         state->u_color.set(i == 0 ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f});
