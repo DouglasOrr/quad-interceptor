@@ -83,6 +83,9 @@ struct Uniform {
     void set(const Vec<3>& v) const {
         if (loc >= 0) glUniform3fv(loc, 1, v.data);
     }
+    void set(const Vec<2>& v) const {
+        if (loc >= 0) glUniform2fv(loc, 1, v.data);
+    }
     void set(float f) const {
         if (loc >= 0) glUniform1f(loc, f);
     }
@@ -185,17 +188,25 @@ struct Mesh {
     }
 };
 
-// Bundles a static cube + per-instance data (loc 1/2, divisor 1).
-// Text geometry batch: builds glyph quads into a dynamic VBO.
+constexpr float QUAD[] = {
+    0.0f, 1.0f,  1.0f, 1.0f,  1.0f, 0.0f,
+    0.0f, 1.0f,  1.0f, 0.0f,  0.0f, 0.0f,
+};
+
+// Bundles a static quad + per-instance data (pos, glyph) for instanced text rendering.
 struct TextBatch {
-    GlVertexArray vao;
-    GlBuffer vbo;
     GlTexture tex;
     Font font;
     std::array<int, 256> glyph_map{};
     uint glyph_cols = 0;
     uint glyph_rows = 0;
-    std::vector<float> verts;
+    Mesh mesh;
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_color;
+    Uniform u_scale;
+    Uniform u_font_size;
+    Uniform u_grid_dims;
 
     TextBatch() {
         font = Font::load();
@@ -227,54 +238,91 @@ struct TextBatch {
                      sheet.data());
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        glBindVertexArray(vao.id);
-        glBindBuffer(GL_ARRAY_BUFFER, vbo.id);
-        glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_DYNAMIC_DRAW);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float),
-                              (void*)(2 * sizeof(float)));
-        glEnableVertexAttribArray(1);
-        glBindVertexArray(0);
+        const char* text_v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+layout(location=1) in vec2 inst_pos;
+layout(location=2) in vec2 inst_glyph;
+uniform mat4 u_mvp;
+uniform float u_scale;
+uniform vec2 u_font_size;
+uniform vec2 u_grid_dims;
+out vec2 v_uv;
+void main() {
+    vec2 p = inst_pos + pos * u_font_size * u_scale;
+    gl_Position = u_mvp * vec4(p, 0.0, 1.0);
+    vec2 uv_pos = vec2(pos.x, 1.0 - pos.y);
+    v_uv = (inst_glyph + uv_pos) / u_grid_dims;
+}
+)";
+        const char* text_f_src = R"(
+#version 330 core
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform vec3 u_color;
+out vec4 frag;
+void main() {
+    float a = texture(u_tex, v_uv).r;
+    frag = vec4(u_color, a);
+}
+)";
+        program = GlProgram(text_v_src, text_f_src);
+        u_mvp = program.uniform("u_mvp");
+        u_color = program.uniform("u_color");
+        u_scale = program.uniform("u_scale");
+        u_font_size = program.uniform("u_font_size");
+        u_grid_dims = program.uniform("u_grid_dims");
+
+        mesh.vertex_count = 6;
+        mesh.mode = GL_TRIANGLES;
+        mesh.add({.data = QUAD, .bytes = sizeof(QUAD), .loc = 0, .comps = 2});
+        mesh.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 2, .divisor = true});
+        mesh.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 2, .divisor = true});
     }
 
-    void draw(float x, float top_y, float scale, const char* text) {
-        const float cell_w = font.width * scale;
-        const float cell_h = font.height * scale;
+    void draw(const char* text, float x, float top_y, float scale = 1.0f,
+              const Vec<3>& color = {1.0f, 1.0f, 1.0f}) {
+        std::vector<float> inst_pos;
+        std::vector<float> inst_glyph;
         const float advance = font.width * scale;
-        verts.clear();
-        std::array<std::array<float, 4>, 4> quad{};
+
         for (size_t ti = 0; text[ti] != '\0'; ++ti) {
             const int i = glyph_map[static_cast<unsigned char>(text[ti])];
             if (i < 0) continue;
-            const uint col = uint(i) % glyph_cols;
-            const uint row = uint(i) / glyph_cols;
+            const float col = float(uint(i) % glyph_cols);
+            const float row = float(uint(i) / glyph_cols);
             const float x0 = x + float(ti) * advance;
-            const float x1 = x0 + cell_w;
-            const float u0 = float(col) / float(glyph_cols);
-            const float u1 = float(col + 1) / float(glyph_cols);
-            const float vtop = float(row) / float(glyph_rows);
-            const float vbot = float(row + 1) / float(glyph_rows);
-            quad[0] = {x0, top_y + cell_h, u0, vtop};
-            quad[1] = {x1, top_y + cell_h, u1, vtop};
-            quad[2] = {x1, top_y, u1, vbot};
-            quad[3] = {x0, top_y, u0, vbot};
-            const int tris[6] = {0, 1, 2, 0, 2, 3};
-            for (int tri : tris) {
-                auto& q = quad[tri];
-                verts.insert(verts.end(), {q[0], q[1], q[2], q[3]});
-            }
+            inst_pos.insert(inst_pos.end(), {x0, top_y});
+            inst_glyph.insert(inst_glyph.end(), {col, row});
         }
-        if (verts.empty()) return;
-        glBindBuffer(GL_ARRAY_BUFFER, vbo.id);
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizeiptr>(verts.size() * sizeof(float)),
-                     verts.data(), GL_DYNAMIC_DRAW);
-        glBindVertexArray(vao.id);
+
+        mesh.instance_count = static_cast<GLsizei>(inst_pos.size() / 2);
+        if (mesh.instance_count == 0) return;
+
+        mesh.buffers[1].upload(inst_pos, GL_DYNAMIC_DRAW);
+        mesh.buffers[2].upload(inst_glyph, GL_DYNAMIC_DRAW);
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+
+        program.use();
+        u_mvp.set(mat_ortho(0.0f, float(vp[2]), 0.0f, float(vp[3])));
+        u_color.set(color);
+        u_scale.set(scale);
+        u_font_size.set(Vec<2>{float(font.width), float(font.height)});
+        u_grid_dims.set(Vec<2>{float(glyph_cols), float(glyph_rows)});
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, tex.id);
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(verts.size() / 4));
-        glBindVertexArray(0);
+        mesh.draw();
         glBindTexture(GL_TEXTURE_2D, 0);
+
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
     }
 };
 
@@ -327,10 +375,6 @@ struct Renderer::State {
     Uniform u_city_cell_size;
     Uniform u_city_light_dir;
     Uniform u_city_cam_pos;
-
-    GlProgram text_program;
-    Uniform u_text_mvp;
-    Uniform u_text_color;
 
     Mesh drone;
     Mesh floor;
@@ -451,27 +495,6 @@ void main(){
                      .loc = 0,
                      .comps = 3});
 
-    // Text: texture-sampled glyph quads onto an orthographic overlay.
-    const char* text_v_src = R"(
-#version 330 core
-layout(location=0) in vec2 pos;
-layout(location=1) in vec2 uv;
-uniform mat4 u_mvp;
-out vec2 v_uv;
-void main(){ gl_Position = u_mvp * vec4(pos, 0.0, 1.0); v_uv = uv; }
-)";
-    const char* text_f_src = R"(
-#version 330 core
-in vec2 v_uv;
-uniform sampler2D u_tex;
-uniform vec3 u_color;
-out vec4 frag;
-void main(){ float a = texture(u_tex, v_uv).r; frag = vec4(u_color, a); }
-)";
-    state->text_program = GlProgram(text_v_src, text_f_src);
-    state->u_text_mvp = state->text_program.uniform("u_mvp");
-    state->u_text_color = state->text_program.uniform("u_color");
-
     state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
     // Default state
@@ -555,19 +578,9 @@ void Renderer::draw(const GameState& s, float fps) {
     const float margin = 8.0f;
     GLint vp[4];
     glGetIntegerv(GL_VIEWPORT, vp);
-    const float vp_width = float(vp[2]);
-    const float vp_height = float(vp[3]);
     const float text_w = float(std::strlen(fps_label)) * state->text.font.width * scale;
-    const float x = vp_width - margin - text_w;
-    const float top_y = vp_height - margin - state->text.font.height * scale;
+    const float x = float(vp[2]) - margin - text_w;
+    const float top_y = float(vp[3]) - margin - state->text.font.height * scale;
 
-    state->text_program.use();
-    state->u_text_mvp.set(mat_ortho(0.0f, vp_width, 0.0f, vp_height));
-    state->u_text_color.set(Vec<3>{1.0f, 0.4f, 0.4f});
-    glDisable(GL_DEPTH_TEST);
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    state->text.draw(x, top_y, scale, fps_label);
-    glDisable(GL_BLEND);
-    glEnable(GL_DEPTH_TEST);
+    state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
 }
