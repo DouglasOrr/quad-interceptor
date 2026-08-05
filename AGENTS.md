@@ -5,6 +5,11 @@
 ```
 dev                  -- automation (standard build & run commands)
 src/                 -- the game; all *.cpp are globbed by `dev` into one `game` binary
+  game.hpp           -- common header for most things (except platform)
+  platform.hpp       -- target platform wrapper
+  prog/              -- entry points
+  tests/             -- unit tests
+  *.cpp              -- core implementation
 examples/<DD>-<name> -- standalone examples/demos
 ```
 
@@ -17,6 +22,7 @@ examples/<DD>-<name> -- standalone examples/demos
 
 - Leave git edit commands to the user, except where explicitly prompted.
 - If asked to use a worktree, put it in `./agents/<name>`
+- In general, don't generate separate headers for new components - prefer game.hpp.
 
 ## Style
 
