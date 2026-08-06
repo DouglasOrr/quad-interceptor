@@ -29,6 +29,10 @@ constexpr float CUBE[] = {
 constexpr float QUAD2[] = {
     0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
 };
+// 2D unit quad centered at origin, in [-0.5,0.5] (for instanced street bands).
+constexpr float QUAD2C[] = {
+    -0.5f, -0.5f, 0.5f, -0.5f, 0.5f, 0.5f, -0.5f, -0.5f, 0.5f, 0.5f, -0.5f, 0.5f,
+};
 // 3D unit quad in the z=0 plane (centered at origin, like CUBE), used for floor tiles.
 constexpr float QUAD3[] = {
     -0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.5f,  0.5f, 0.0f,
@@ -355,6 +359,8 @@ constexpr int CITY_RADIUS = 60;  // cells rendered around the player in each dir
 constexpr Vec<3> LIGHT_DIR{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
 // constexpr Vec<3> CAM_OFFSET_VEC{0.5f, 0.0f, 0.0f};  // front (cockpit)
 constexpr Vec<3> CAM_OFFSET_VEC{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
+constexpr int MINIMAP_CELLS = 20;                    // radar radius, in street cells
+constexpr int MINIMAP_SIZE = 300;                    // square side, in pixels
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
 // local -z (forward) with +y up; we want forward = drone +x, up = drone +z,
@@ -366,6 +372,186 @@ constexpr Mat4 CAM_ROTATION = {
     0.0f,  0.0f,  1.0f, 0.0f,  // col1: up     = drone +z
     -1.0f, 0.0f,  0.0f, 0.0f,  // col2: back   = drone -x
     0.0f,  0.0f,  0.0f, 1.0f,
+};
+
+// Radar-style minimap overlay.
+struct Minimap {
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_color;
+    Uniform u_translate;
+    Uniform u_scale;
+    Uniform u_radius;
+    Mesh disc;
+    Mesh ring;
+
+    GlProgram grid_program;
+    Uniform g_mvp;
+    Uniform g_color;
+    Uniform g_radius;
+    Uniform g_band_half;
+    Mesh grid;
+
+    Minimap() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+uniform mat4 u_mvp;
+uniform vec2 u_translate;
+uniform float u_scale;
+out vec2 v_local;
+void main(){
+  vec2 p = u_scale * pos + u_translate;
+  v_local = p;
+  gl_Position = u_mvp * vec4(p, 0.0, 1.0);
+}
+)";
+        const char* grid_v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+layout(location=1) in vec2 inst_band;    // .x = band center (world-relative, along its normal),
+                                         // .y = axis (0=vertical, 1=horizontal)
+uniform mat4 u_mvp;
+uniform float u_radius;
+uniform float u_band_half;
+out vec2 v_local;
+void main(){
+  vec2 p;
+  if (inst_band.y < 0.5)
+    p = vec2(inst_band.x + pos.x * 2.0 * u_band_half, pos.y * 2.0 * u_radius);
+  else
+    p = vec2(pos.x * 2.0 * u_radius, inst_band.x + pos.y * 2.0 * u_band_half);
+  v_local = p;
+  gl_Position = u_mvp * vec4(p, 0.0, 1.0);
+}
+)";
+        const char* f_src = R"(
+#version 330 core
+in vec2 v_local;
+uniform vec3 u_color;
+uniform float u_radius;
+out vec4 frag;
+void main(){
+  if (dot(v_local, v_local) > u_radius * u_radius) discard;
+  frag = vec4(u_color, 1.0);
+}
+)";
+        program = GlProgram(v_src, f_src);
+        u_mvp = program.uniform("u_mvp");
+        u_color = program.uniform("u_color");
+        u_translate = program.uniform("u_translate");
+        u_scale = program.uniform("u_scale");
+        u_radius = program.uniform("u_radius");
+
+        grid_program = GlProgram(grid_v_src, f_src);
+        g_mvp = grid_program.uniform("u_mvp");
+        g_color = grid_program.uniform("u_color");
+        g_radius = grid_program.uniform("u_radius");
+        g_band_half = grid_program.uniform("u_band_half");
+
+        std::vector<float> disc_verts = {0.0f, 0.0f};
+        constexpr int n_seg = 64;  // circle smoothness
+        for (int i = 0; i <= n_seg; ++i) {
+            float a = 2.0f * M_PIf * float(i % n_seg) / float(n_seg);
+            disc_verts.insert(disc_verts.end(), {std::cos(a), std::sin(a)});
+        }
+        disc.mode = GL_TRIANGLE_FAN;
+        disc.vertex_count = static_cast<GLsizei>(disc_verts.size() / 2);
+        disc.add({.data = disc_verts.data(),
+                  .bytes = static_cast<GLsizeiptr>(disc_verts.size() * sizeof(float)),
+                  .loc = 0,
+                  .comps = 2});
+        ring.mode = GL_LINE_LOOP;
+        ring.vertex_count = n_seg;
+        // skip first and last vertex (center and duplicate)
+        ring.add({.data = disc_verts.data() + 2,
+                  .bytes = static_cast<GLsizeiptr>(n_seg * 2 * sizeof(float)),
+                  .loc = 0,
+                  .comps = 2});
+        grid.mode = GL_TRIANGLES;
+        grid.vertex_count = 6;
+        grid.add({.data = QUAD2C, .bytes = sizeof(QUAD2C), .loc = 0, .comps = 2});
+        grid.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 2, .divisor = true});
+    }
+
+    void draw(const GameState& s) {
+        const float R = float(City::cell_size) * MINIMAP_CELLS;
+        const float px_to_world = 2.0f * R / float(MINIMAP_SIZE);  // 1px radius -> world scale
+
+        const Vec<3>& p = s.drones[0].position;
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        glViewport(vp[2] - MINIMAP_SIZE - 16, 16, MINIMAP_SIZE, MINIMAP_SIZE);
+        glDisable(GL_DEPTH_TEST);
+        glDisable(GL_BLEND);
+
+        // Heading-up radar: rotate so the player's forward points up.
+        const Vec<3> fwd = rotate(s.drones[0].orientation, Vec<3>{1.0f, 0.0f, 0.0f});
+        const float phi = M_PIf / 2.0f - std::atan2(fwd[1], fwd[0]);
+        const Quat heading{0.0f, 0.0f, std::sin(phi / 2.0f), std::cos(phi / 2.0f)};
+        const Mat4 mvp = mul(mat_ortho(-R, R, -R, R), mat_from(heading, {0.0f, 0.0f, 0.0f}));
+
+        // Background disc.
+        program.use();
+        u_mvp.set(mvp);
+        u_radius.set(R);
+        auto draw_disc = [&](float scale, Vec<2> translate, const Vec<3>& color) {
+            u_scale.set(scale);
+            u_translate.set(translate);
+            u_color.set(color);
+            disc.draw();
+        };
+        draw_disc(R, {0.0f, 0.0f}, {0.04f, 0.06f, 0.10f});
+
+        // Street grid: one 2*street_size-wide street per block, at its low edge
+        // (ox|oy in [0,street_size)). Street center within a block is at the
+        // midpoint of the street cells, i.e. 0.5*street_size*cell from the block
+        // origin -- so a drone sitting on an intersection center maps to (0,0).
+        grid_program.use();
+        {
+            const float cell = float(City::cell_size);
+            const float block_w = float(City::block_size) * cell;
+            const float band_half = 0.5f * float(City::street_size) * cell;
+            std::vector<float> bands;  // (center, axis) per band
+            const int nx0 = int(std::floor((p[0] - R) / block_w)) - 1;
+            const int nx1 = int(std::ceil((p[0] + R) / block_w)) + 1;
+            for (int n = nx0; n <= nx1; ++n)
+                bands.insert(bands.end(), {n * block_w + band_half - p[0], 0.0f});
+            const int ny0 = int(std::floor((p[1] - R) / block_w)) - 1;
+            const int ny1 = int(std::ceil((p[1] + R) / block_w)) + 1;
+            for (int m = ny0; m <= ny1; ++m)
+                bands.insert(bands.end(), {m * block_w + band_half - p[1], 1.0f});
+            grid.buffers[1].upload(bands, GL_DYNAMIC_DRAW);
+
+            g_mvp.set(mvp);
+            g_radius.set(R);
+            g_band_half.set(band_half);
+            g_color.set(Vec<3>{0.08f, 0.12f, 0.15f});
+            grid.instance_count = static_cast<GLsizei>(bands.size() / 2);
+            grid.draw();
+        }
+        program.use();
+
+        // Concentric radar rings
+        u_translate.set(Vec<2>{0.0f, 0.0f});
+        u_color.set(Vec<3>{0.1f, 0.4f, 0.5f});
+        for (float r : {R, 2.0f * R / 3.0f, R / 3.0f}) {
+            u_scale.set(r);
+            ring.draw();
+        }
+
+        // Drone markers
+        for (size_t i = 0; i < s.drones.size(); ++i) {
+            const Drone& d = s.drones[i];
+            if (!d.alive) continue;
+            Vec<3> color = (i == 0) ? Vec<3>{0.2f, 0.75f, 0.95f} : Vec<3>{0.95f, 0.20f, 0.20f};
+            draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
+        }
+
+        glViewport(vp[0], vp[1], vp[2], vp[3]);
+        glEnable(GL_DEPTH_TEST);
+    }
 };
 
 }  // namespace
@@ -385,11 +571,12 @@ struct Renderer::State {
     Mesh floor;
     Mesh buildings;
 
-    int64 city_anchor_x = INT64_MAX;
-    int64 city_anchor_y = INT64_MAX;
-
+    Minimap minimap;
     TextBatch text;
     Mat4 projection;
+
+    int64 city_anchor_x = INT64_MAX;
+    int64 city_anchor_y = INT64_MAX;
 
     Vec<3> camera_pos{};
     Vec<3> camera_right{1.0f, 0.0f, 0.0f};
@@ -579,6 +766,9 @@ void Renderer::draw(const GameState& s, float dt) {
         state->u_color.set(i == 0 ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f});
         state->drone.draw();
     }
+
+    // Draw minimap (radar overlay)
+    state->minimap.draw(s);
 
     // Draw FPS counter
     char fps_label[32];

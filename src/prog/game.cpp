@@ -26,8 +26,9 @@ int main() {
     GameState state;
     auto C = float(City::cell_size);
     state.drones = {
-        Drone::create({0.0f, C, 1.0f}),
+        Drone::create({C, C, 1.0f}),
         Drone::create({5 * C, C, 1.0f}),
+        Drone::create({C, 10 * C, 1.0f}),
     };
     auto initial_state = state;
     Renderer renderer;

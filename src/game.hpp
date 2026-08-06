@@ -62,6 +62,8 @@ struct Cell {
 
 struct City {
     inline static constexpr uint cell_size = 15;
+    inline static constexpr uint block_size = 10;    // cells per city block (street grid period)
+    inline static constexpr uint street_size = 2;    // street width, in cells (each block edge)
 
     int64 seed;
     Cell operator()(int64 x, int64 y) const;  // (x, y) are cell coordinates
