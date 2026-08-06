@@ -14,12 +14,6 @@ constexpr float BODY_MASS = 1.0f;
 constexpr Mat3 DAMPING_M = mat_diag(0.2f, 0.2f, 1.0f);
 constexpr Mat3 BODY_INV_INERTIA_M = mat_diag(1.0f, 1.0f, 5.0f);
 constexpr float MOTOR_FORCE = 6.0f;
-constexpr std::array<Vec<3>, 4> MOTOR_OFFSETS_M = {{
-    {{0.1f, 0.1f, 0.0f}},    // FL
-    {{0.1f, -0.1f, 0.0f}},   // FR
-    {{-0.1f, 0.1f, 0.0f}},   // BL
-    {{-0.1f, -0.1f, 0.0f}},  // BR
-}};
 constexpr float MOTOR_TORQUE = 0.2f;
 constexpr Mat3 ANG_DAMPING_M = mat_diag(0.4f, 0.4f, 0.4f);
 
@@ -159,6 +153,9 @@ void Physics::tick(GameState& state) {
         cBL += fb + rl;
         cBR += fb + -rl;
 
+        auto _speed = [](float c) { return std::min(1.0f, std::abs(c) / 3.0f); };
+        d.motor_speed = {_speed(cFL), _speed(cFR), _speed(cBL), _speed(cBR)};
+
         // Forces
         auto force = BODY_MASS * GRAVITY;
         force += MOTOR_FORCE * (cFL + cFR + cBL + cBR) * mul(R, UP);
@@ -166,10 +163,10 @@ void Physics::tick(GameState& state) {
 
         // Torques
         auto torque_m = MOTOR_TORQUE * (-cFL + cFR + cBL - cBR) * UP;
-        torque_m += cross(MOTOR_OFFSETS_M[0], cFL * MOTOR_FORCE * UP);
-        torque_m += cross(MOTOR_OFFSETS_M[1], cFR * MOTOR_FORCE * UP);
-        torque_m += cross(MOTOR_OFFSETS_M[2], cBL * MOTOR_FORCE * UP);
-        torque_m += cross(MOTOR_OFFSETS_M[3], cBR * MOTOR_FORCE * UP);
+        torque_m += cross(Drone::motor_offsets_m[0], cFL * MOTOR_FORCE * UP);
+        torque_m += cross(Drone::motor_offsets_m[1], cFR * MOTOR_FORCE * UP);
+        torque_m += cross(Drone::motor_offsets_m[2], cBL * MOTOR_FORCE * UP);
+        torque_m += cross(Drone::motor_offsets_m[3], cBR * MOTOR_FORCE * UP);
         auto torque = mul(R, torque_m);
 
         // Dynamics

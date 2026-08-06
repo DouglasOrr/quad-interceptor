@@ -189,8 +189,7 @@ struct Mesh {
 };
 
 constexpr float QUAD[] = {
-    0.0f, 1.0f,  1.0f, 1.0f,  1.0f, 0.0f,
-    0.0f, 1.0f,  1.0f, 0.0f,  0.0f, 0.0f,
+    0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
 };
 
 // Bundles a static quad + per-instance data (pos, glyph) for instanced text rendering.
@@ -280,7 +279,10 @@ void main() {
         mesh.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 2, .divisor = true});
     }
 
-    void draw(const char* text, float x, float top_y, float scale = 1.0f,
+    void draw(const char* text,
+              float x,
+              float top_y,
+              float scale = 1.0f,
               const Vec<3>& color = {1.0f, 1.0f, 1.0f}) {
         std::vector<float> inst_pos;
         std::vector<float> inst_glyph;
@@ -385,8 +387,13 @@ struct Renderer::State {
     int64 city_anchor_y = INT64_MAX;
 
     TextBatch text;
-
     Mat4 projection;
+
+    Vec<3> camera_pos{};
+    Vec<3> camera_right{1.0f, 0.0f, 0.0f};
+    float fps = 0.0f;
+    float fps_window = 0.0f;
+    int fps_frames = 0;
 };
 
 Renderer::Renderer() : state(std::make_unique<State>()) {
@@ -505,19 +512,34 @@ void main(){
 
 Renderer::~Renderer() = default;
 
-void Renderer::draw(const GameState& s, float fps) {
+void Renderer::draw(const GameState& s, float dt) {
+    constexpr float period = 0.5f;
+    ++state->fps_frames;
+    state->fps_window += dt;
+    if (state->fps_window >= period) {
+        state->fps = float(state->fps_frames) / state->fps_window;
+        state->fps_window = 0.0f;
+        state->fps_frames = 0;
+    }
+
+    if (!s.drones.empty()) {
+        const auto& d0 = s.drones[0];
+        state->camera_pos = d0.position + rotate(d0.orientation, CAM_OFFSET_VEC);
+        state->camera_right = rotate(d0.orientation, {0.0f, -1.0f, 0.0f});
+    }
+
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
 
     // Chase drone 0
     const Drone& d0 = s.drones[0];
-    Vec<3> eye = d0.position + rotate(d0.orientation, CAM_OFFSET_VEC);
-    Mat4 view = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
+    Vec<3> eye = state->camera_pos;
+    Mat4 view_mat = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
 
     // Draw floor (opaque quad), then grid lines.
     state->program.use();
-    Mat4 mvp = mul(state->projection, view);
+    Mat4 mvp = mul(state->projection, view_mat);
     state->u_mvp.set(mvp);
     state->u_color.set(Vec<3>{0.05f, 0.05f, 0.07f});
     state->floor.draw();
@@ -564,7 +586,7 @@ void Renderer::draw(const GameState& s, float fps) {
         auto size = 2 * Drone::radius * 1.1f;
         Mat4 model =
             mul(mat_from(d.orientation, d.position), mat_diag(size, size, Drone::height, 1));
-        Mat4 mvp = mul(state->projection, mul(view, model));
+        Mat4 mvp = mul(state->projection, mul(view_mat, model));
         state->u_mvp.set(mvp);
         state->u_color.set(i == 0 ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f});
         state->drone.draw();
@@ -572,7 +594,7 @@ void Renderer::draw(const GameState& s, float fps) {
 
     // Draw FPS counter
     char fps_label[32];
-    std::snprintf(fps_label, sizeof(fps_label), "%d FPS", int(fps));
+    std::snprintf(fps_label, sizeof(fps_label), "%d FPS", int(state->fps));
 
     const float scale = 1.5f;
     const float margin = 8.0f;
@@ -583,4 +605,12 @@ void Renderer::draw(const GameState& s, float fps) {
     const float top_y = float(vp[3]) - margin - state->text.font.height * scale;
 
     state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
+}
+
+Vec<3> Renderer::camera_pos() const {
+    return state->camera_pos;
+}
+
+Vec<3> Renderer::camera_right() const {
+    return state->camera_right;
 }

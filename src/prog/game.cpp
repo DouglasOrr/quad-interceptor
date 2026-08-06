@@ -2,24 +2,6 @@
 #include "platform.hpp"
 
 namespace {
-// Measures a smoothed frames-per-second from per-frame dt samples.
-struct Fps {
-    constexpr static float period = 0.5f;  // seconds
-    float value = 0.0f;
-    float window = 0.0f;
-    int frames = 0;
-
-    void tick(float dt) {
-        ++frames;
-        window += dt;
-        if (window >= period) {
-            value = float(frames) / window;
-            window = 0.0f;
-            frames = 0;
-        }
-    }
-};
-
 void copy_control(const Window& w, Vec<4>& c) {
     auto f = [](bool b) { return b ? 1.0f : 0.0f; };
     c = {};
@@ -49,9 +31,12 @@ int main() {
     };
     auto initial_state = state;
     Renderer renderer;
+    AudioEngine audio_engine;
+    window.set_audio_callback([&audio_engine](int16_t* stream, int num_frames) {
+        audio_engine.fill_buffer(stream, num_frames);
+    });
     Stopwatch stopwatch;
     float physics_time = 0.0f;
-    Fps fps;
     while (window.frame()) {
         const float dt = stopwatch.lap();
         if (window.pressed(Key::hash)) {
@@ -64,7 +49,7 @@ int main() {
             Physics::tick(state);
             physics_time -= Physics::dt;
         }
-        fps.tick(dt);
-        renderer.draw(state, fps.value);
+        renderer.draw(state, dt);
+        audio_engine.update(state, renderer.camera_pos(), renderer.camera_right());
     }
 }

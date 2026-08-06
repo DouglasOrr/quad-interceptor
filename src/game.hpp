@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +32,12 @@ struct Pid {
 struct Drone {
     inline static constexpr float height = 0.15f;
     inline static constexpr float radius = 0.45f;
+    inline static constexpr std::array<Vec<3>, 4> motor_offsets_m = {{
+        {{0.1f, 0.1f, 0.0f}},    // FL
+        {{0.1f, -0.1f, 0.0f}},   // FR
+        {{-0.1f, 0.1f, 0.0f}},   // BL
+        {{-0.1f, -0.1f, 0.0f}},  // BR
+    }};
 
     // State
     Vec<3> position;      // (world)
@@ -40,7 +47,8 @@ struct Drone {
     bool alive = true;
 
     // Control
-    Vec<4> control_m;  // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]
+    Vec<4> control_m;    // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]
+    Vec<4> motor_speed;  // per-motor output (FL, FR, BL, BR) in [0, 1]
     Pid pid_roll;
     Pid pid_pitch;
 
@@ -96,7 +104,24 @@ struct Renderer {
     Renderer();
     ~Renderer();
 
-    void draw(const GameState& state, float fps);
+    void draw(const GameState& state, float dt);
+    Vec<3> camera_pos() const;
+    Vec<3> camera_right() const;
+
+private:
+    struct State;
+    std::unique_ptr<State> state;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Audio
+
+struct AudioEngine {
+    AudioEngine();
+    ~AudioEngine();
+
+    void update(const GameState& state, Vec<3> cam_pos, Vec<3> cam_right);
+    void fill_buffer(int16_t* stream, int num_samples);
 
 private:
     struct State;

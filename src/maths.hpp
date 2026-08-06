@@ -181,6 +181,19 @@ inline constexpr Vec<3> cross(const Vec<3>& a, const Vec<3>& b) {
     };
 }
 
+template <uint N>
+inline constexpr float dot(const Vec<N>& a, const Vec<N>& b) {
+    float s = 0.0f;
+    for (uint i = 0; i < N; ++i)
+        s += a[i] * b[i];
+    return s;
+}
+
+template <uint N>
+inline float length(const Vec<N>& v) {
+    return std::sqrt(dot(v, v));
+}
+
 inline constexpr Vec<3> rotate(Quat q, Vec<3> v) {
     // t = 2 * (q.xyz x v), then v' = v + qw*t + (q.xyz x t)
     Vec<3> qxyz = {q[0], q[1], q[2]};

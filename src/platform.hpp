@@ -3,6 +3,7 @@
 #include <SDL.h>
 #include <SDL_opengl.h>
 #include <cstdint>
+#include <functional>
 #include <memory>
 
 #define FOREACH_GL_FUNCTION(OP)                                                             \
@@ -68,6 +69,9 @@ enum class Key : uint8_t {
 };
 
 struct Window {
+    struct State;
+    inline static constexpr int audio_sample_rate = 44100;
+
     Window(const char* title, int width, int height);
     ~Window();
 
@@ -80,8 +84,9 @@ struct Window {
     // Query whether a key was pressed (transition from not held to held) in the most recent frame()
     bool pressed(Key k) const;
 
+    void set_audio_callback(std::function<void(int16_t* stream, int num_frames)> callback);
+
 private:
-    struct State;
     std::unique_ptr<State> state;
 };
 

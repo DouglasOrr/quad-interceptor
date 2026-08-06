@@ -1,5 +1,6 @@
 #include <SDL.h>
 #include <array>
+#include <cstring>
 #include <stdexcept>
 
 #include "platform.hpp"
@@ -11,10 +12,23 @@ FOREACH_GL_FUNCTION(INSTANTIATE_EXTERN)
 struct Window::State {
     SDL_Window* window = nullptr;
     SDL_GLContext gl_context = nullptr;
+    SDL_AudioDeviceID audio_dev = 0;
+    std::function<void(int16_t* stream, int num_frames)> audio_callback;
     bool started = false;
     std::array<bool, static_cast<size_t>(Key::count)> held_keys{};
     std::array<bool, static_cast<size_t>(Key::count)> prev_held_keys{};
 };
+
+namespace {
+void sdl_audio_callback(void* userdata, Uint8* stream, int len) {
+    auto* state = static_cast<Window::State*>(userdata);
+    if (state->audio_callback) {
+        state->audio_callback(reinterpret_cast<int16_t*>(stream), len / (2 * sizeof(int16_t)));
+    } else {
+        std::memset(stream, 0, len);
+    }
+}
+}  // namespace
 
 // Order must match the `Key` enum in platform.hpp.
 static constexpr SDL_Scancode key_scancodes[] = {
@@ -27,7 +41,7 @@ static constexpr SDL_Scancode key_scancodes[] = {
 static_assert(std::size(key_scancodes) == static_cast<size_t>(Key::count));
 
 Window::Window(const char* title, int width, int height) : state(std::make_unique<State>()) {
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -61,9 +75,28 @@ Window::Window(const char* title, int width, int height) : state(std::make_uniqu
     SDL_GL_GetDrawableSize(state->window, &w, &h);
     glViewport(0, 0, w, h);
     SDL_GL_SetSwapInterval(1);
+
+    // Open audio device
+    SDL_AudioSpec desired, obtained;
+    std::memset(&desired, 0, sizeof(desired));
+    desired.freq = Window::audio_sample_rate;
+    desired.format = AUDIO_S16SYS;
+    desired.channels = 2;
+    desired.samples = 512;
+    desired.callback = sdl_audio_callback;
+    desired.userdata = state.get();
+
+    state->audio_dev = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
+    if (state->audio_dev != 0) {
+        // 0 unpauses (starts) audio playback (devices start paused by default in SDL2)
+        SDL_PauseAudioDevice(state->audio_dev, 0);
+    }
 }
 
 Window::~Window() {
+    if (state->audio_dev != 0) {
+        SDL_CloseAudioDevice(state->audio_dev);
+    }
     if (state->gl_context) SDL_GL_DeleteContext(state->gl_context);
     if (state->window) SDL_DestroyWindow(state->window);
     SDL_Quit();
@@ -104,4 +137,8 @@ bool Window::held(Key k) const {
 bool Window::pressed(Key k) const {
     size_t idx = static_cast<size_t>(k);
     return state->held_keys[idx] && !state->prev_held_keys[idx];
+}
+
+void Window::set_audio_callback(std::function<void(int16_t* stream, int num_frames)> callback) {
+    state->audio_callback = std::move(callback);
 }
