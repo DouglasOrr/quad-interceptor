@@ -23,6 +23,8 @@ constexpr float PID_KP = 5.0f;
 constexpr float PID_KI = 3.0f;
 constexpr float PID_KD = 0.0f;
 
+constexpr float EXPLOSION_RADIUS = 5.0f;
+
 // City
 constexpr Vec<2> CITY_BUILDING_HEIGHT_RANGE = {10.0f, 100.0f};
 
@@ -115,6 +117,14 @@ void Physics::tick(GameState& state) {
         if (!d.alive || hits_building(state.city, d.position, Drone::radius)) {
             d.alive = false;
             continue;
+        }
+
+        // Collisions (drones)
+        if (d_index != 0 && state.drones[0].alive) {
+            if (length(d.position - state.drones[0].position) < EXPLOSION_RADIUS) {
+                d.alive = false;
+                state.drones[0].alive = false;
+            }
         }
 
         // Collisions (floor)

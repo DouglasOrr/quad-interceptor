@@ -62,8 +62,8 @@ struct Cell {
 
 struct City {
     inline static constexpr uint cell_size = 15;
-    inline static constexpr uint block_size = 10;    // cells per city block (street grid period)
-    inline static constexpr uint street_size = 2;    // street width, in cells (each block edge)
+    inline static constexpr uint block_size = 10;  // cells per city block (street grid period)
+    inline static constexpr uint street_size = 2;  // street width, in cells (each block edge)
 
     int64 seed;
     Cell operator()(int64 x, int64 y) const;  // (x, y) are cell coordinates
@@ -71,8 +71,17 @@ struct City {
 
 struct GameState {
     uint64 tick;
-    std::vector<Drone> drones;  // with player = drones[0]
+    Vec<3> spawn;               // player respawn position
+    uint64 respawn_time;      // physics tick at which the player respawns (0 = none)
+    std::vector<Drone> drones;  // player = drones[0]
     City city;
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Game Manager
+
+struct GameManager {
+    void update(GameState& state);
 };
 
 ///////////////////////////////////////////////////////////////////////////////

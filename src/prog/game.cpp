@@ -25,12 +25,14 @@ int main() {
 
     GameState state;
     auto C = float(City::cell_size);
+    state.spawn = {C, C, 1.0f};
     state.drones = {
-        Drone::create({C, C, 1.0f}),
+        Drone::create(state.spawn),
         Drone::create({5 * C, C, 1.0f}),
         Drone::create({C, 10 * C, 1.0f}),
     };
     auto initial_state = state;
+    GameManager game_manager;
     Renderer renderer;
     AudioEngine audio_engine;
     window.set_audio_callback([&audio_engine](int16_t* stream, int num_frames) {
@@ -50,6 +52,7 @@ int main() {
             Physics::tick(state);
             physics_time -= Physics::dt;
         }
+        game_manager.update(state);
         renderer.draw(state, dt);
         audio_engine.update(state, renderer.camera_pos(), renderer.camera_right());
     }
