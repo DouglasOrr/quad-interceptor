@@ -13,6 +13,28 @@
 
 namespace {
 
+// unit cube (centered at origin, side length 1)
+constexpr float CUBE[] = {
+    -0.5f, -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f,
+    -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  0.5f,
+    0.5f,  0.5f,  -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  0.5f,  0.5f,
+    -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f, -0.5f, -0.5f,
+    -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, 0.5f,  -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  -0.5f,
+    0.5f,  0.5f,  0.5f,  -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  0.5f,  -0.5f, 0.5f,  0.5f,
+    -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f, -0.5f,
+    0.5f,  0.5f,  -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, -0.5f, 0.5f,  0.5f,  0.5f,  0.5f,
+    0.5f,  -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  0.5f,  0.5f,  0.5f,
+};
+// 2D unit quad (top-left origin)
+constexpr float QUAD2[] = {
+    0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
+};
+// 3D unit quad in the z=0 plane (centered at origin, like CUBE), used for floor tiles.
+constexpr float QUAD3[] = {
+    -0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.5f,  0.5f, 0.0f,
+    -0.5f, -0.5f, 0.0f, 0.5f, 0.5f,  0.0f, -0.5f, 0.5f, 0.0f,
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // RAII OpenGL
 
@@ -188,10 +210,6 @@ struct Mesh {
     }
 };
 
-constexpr float QUAD[] = {
-    0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f,
-};
-
 // Bundles a static quad + per-instance data (pos, glyph) for instanced text rendering.
 struct TextBatch {
     GlTexture tex;
@@ -274,7 +292,7 @@ void main() {
 
         mesh.vertex_count = 6;
         mesh.mode = GL_TRIANGLES;
-        mesh.add({.data = QUAD, .bytes = sizeof(QUAD), .loc = 0, .comps = 2});
+        mesh.add({.data = QUAD2, .bytes = sizeof(QUAD2), .loc = 0, .comps = 2});
         mesh.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 2, .divisor = true});
         mesh.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 2, .divisor = true});
     }
@@ -333,10 +351,7 @@ void main() {
 
 // Scene constants.
 constexpr float FOV_DEGS = 100.0f;
-constexpr float FLOOR_HALF = 500.0f;  // floor spans +/-FLOOR_HALF on X/Y
-constexpr float GRID_STEP = 3.0f;
-constexpr int CITY_RADIUS = 60;   // cells rendered around the player in each direction
-constexpr float GRID_Z = 0.001f;  // slightly above floor to avoid z-fighting
+constexpr int CITY_RADIUS = 60;  // cells rendered around the player in each direction
 constexpr Vec<3> LIGHT_DIR{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
 // constexpr Vec<3> CAM_OFFSET_VEC{0.5f, 0.0f, 0.0f};  // front (cockpit)
 constexpr Vec<3> CAM_OFFSET_VEC{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
@@ -351,18 +366,6 @@ constexpr Mat4 CAM_ROTATION = {
     0.0f,  0.0f,  1.0f, 0.0f,  // col1: up     = drone +z
     -1.0f, 0.0f,  0.0f, 0.0f,  // col2: back   = drone -x
     0.0f,  0.0f,  0.0f, 1.0f,
-};
-
-constexpr float CUBE[] = {
-    -0.5f, -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f,
-    -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  0.5f,
-    0.5f,  0.5f,  -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  0.5f,  0.5f,
-    -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f, -0.5f, -0.5f,
-    -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, 0.5f,  -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  -0.5f,
-    0.5f,  0.5f,  0.5f,  -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  0.5f,  -0.5f, 0.5f,  0.5f,
-    -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f, -0.5f,
-    0.5f,  0.5f,  -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, -0.5f, 0.5f,  0.5f,  0.5f,  0.5f,
-    0.5f,  -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  -0.5f, 0.5f,  0.5f,  0.5f,  0.5f,  0.5f,
 };
 
 }  // namespace
@@ -380,9 +383,8 @@ struct Renderer::State {
 
     Mesh drone;
     Mesh floor;
-    Mesh grid;
+    Mesh buildings;
 
-    Mesh city;
     int64 city_anchor_x = INT64_MAX;
     int64 city_anchor_y = INT64_MAX;
 
@@ -465,42 +467,19 @@ void main(){
     state->u_city_light_dir = state->city_program.uniform("u_light_dir");
     state->u_city_cam_pos = state->city_program.uniform("u_cam_pos");
 
-    state->city.mode = GL_TRIANGLES;
-    state->city.vertex_count = 36;
-    state->city.instance_count = 0;
-    state->city.add({.data = CUBE, .bytes = sizeof(CUBE), .loc = 0, .comps = 3});
-    state->city.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
-    state->city.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+    state->buildings.mode = GL_TRIANGLES;
+    state->buildings.vertex_count = 36;
+    state->buildings.instance_count = 0;
+    state->buildings.add({.data = CUBE, .bytes = sizeof(CUBE), .loc = 0, .comps = 3});
+    state->buildings.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
+    state->buildings.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
 
-    // Floor at z=0.
-    constexpr float floor_quad[] = {
-        -FLOOR_HALF, -FLOOR_HALF, 0.0f, FLOOR_HALF,  -FLOOR_HALF, 0.0f,
-        FLOOR_HALF,  FLOOR_HALF,  0.0f, -FLOOR_HALF, -FLOOR_HALF, 0.0f,
-        FLOOR_HALF,  FLOOR_HALF,  0.0f, -FLOOR_HALF, FLOOR_HALF,  0.0f,
-    };
-    state->floor.vertex_count = 6;
     state->floor.mode = GL_TRIANGLES;
-    state->floor.add({.data = floor_quad, .bytes = sizeof(floor_quad), .loc = 0, .comps = 3});
-
-    // Grid lines on the same plane, rendered slightly above to avoid z-fighting.
-    std::vector<float> grid;
-    auto n_half = int(FLOOR_HALF / GRID_STEP);
-    for (int i = -n_half; i <= n_half; ++i) {
-        float x = i * GRID_STEP;
-        float y1 = -FLOOR_HALF;
-        float y2 = FLOOR_HALF;
-        grid.insert(grid.end(), {x, y1, GRID_Z, x, y2, GRID_Z});
-        float y = i * GRID_STEP;
-        float x1 = -FLOOR_HALF;
-        float x2 = FLOOR_HALF;
-        grid.insert(grid.end(), {x1, y, GRID_Z, x2, y, GRID_Z});
-    }
-    state->grid.vertex_count = static_cast<GLsizei>(grid.size() / 3);
-    state->grid.mode = GL_LINES;
-    state->grid.add({.data = grid.data(),
-                     .bytes = static_cast<GLsizeiptr>(grid.size() * sizeof(float)),
-                     .loc = 0,
-                     .comps = 3});
+    state->floor.vertex_count = 6;
+    state->floor.instance_count = 0;
+    state->floor.add({.data = QUAD3, .bytes = sizeof(QUAD3), .loc = 0, .comps = 3});
+    state->floor.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
+    state->floor.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
 
     state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
@@ -537,46 +516,55 @@ void Renderer::draw(const GameState& s, float dt) {
     Vec<3> eye = state->camera_pos;
     Mat4 view_mat = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
 
-    // Draw floor (opaque quad), then grid lines.
-    state->program.use();
+    // City: buildings and floor tiles
     Mat4 mvp = mul(state->projection, view_mat);
-    state->u_mvp.set(mvp);
-    state->u_color.set(Vec<3>{0.05f, 0.05f, 0.07f});
-    state->floor.draw();
-    state->u_color.set(Vec<3>{0.35f, 0.35f, 0.45f});
-    state->grid.draw();
-
-    // City: build one big Mesh with per-vertex positions/colors
     const City& city = s.city;
-    const int64 ax = static_cast<int64>(std::floor(d0.position[0] / float(city.cell_size)));
-    const int64 ay = static_cast<int64>(std::floor(d0.position[1] / float(city.cell_size)));
+    const float city_cell_size = city.cell_size;
+    const int64 ax = static_cast<int64>(std::floor(d0.position[0] / city_cell_size));
+    const int64 ay = static_cast<int64>(std::floor(d0.position[1] / city_cell_size));
     if (ax != state->city_anchor_x || ay != state->city_anchor_y) {
         state->city_anchor_x = ax;
         state->city_anchor_y = ay;
-        std::vector<float> inst_pos, inst_color;
+        std::vector<float> floor_world, floor_color;
+        std::vector<float> buildings_world, buildings_color;
         for (int64 dy = -CITY_RADIUS; dy <= CITY_RADIUS; ++dy) {
             for (int64 dx = -CITY_RADIUS; dx <= CITY_RADIUS; ++dx) {
                 Cell c = city(ax + dx, ay + dy);
-                if (c.height <= 0.0f) continue;
-                float k = float((c.hash >> 32) & 0xff) / 255.0f;
-                float shade = 0.2f + 0.2f * k;
-                float wx = float(ax + dx) * float(city.cell_size);
-                float wy = float(ay + dy) * float(city.cell_size);
-                inst_pos.insert(inst_pos.end(), {wx, wy, c.height});
-                inst_color.insert(inst_color.end(), {shade, shade, shade});
+                float wx = float(ax + dx) * city_cell_size;
+                float wy = float(ay + dy) * city_cell_size;
+                if (c.height > 0.0f) {
+                    float k = float((c.hash >> 32) & 0xff) / 255.0f;
+                    float shade = 0.2f + 0.2f * k;
+                    buildings_world.insert(buildings_world.end(), {wx, wy, c.height});
+                    buildings_color.insert(buildings_color.end(), {shade, shade, shade});
+                } else {
+                    floor_world.insert(floor_world.end(), {wx, wy, 0.0f});
+                    floor_color.insert(floor_color.end(), {0.15f, 0.15f, 0.15f});
+                }
             }
         }
-        state->city.instance_count = static_cast<GLsizei>(inst_pos.size() / 3);
-        state->city.buffers[1].upload(inst_pos, GL_DYNAMIC_DRAW);
-        state->city.buffers[2].upload(inst_color, GL_DYNAMIC_DRAW);
+        state->floor.instance_count = static_cast<GLsizei>(floor_world.size() / 3);
+        state->floor.buffers[1].upload(floor_world, GL_DYNAMIC_DRAW);
+        state->floor.buffers[2].upload(floor_color, GL_DYNAMIC_DRAW);
+        state->buildings.instance_count = static_cast<GLsizei>(buildings_world.size() / 3);
+        state->buildings.buffers[1].upload(buildings_world, GL_DYNAMIC_DRAW);
+        state->buildings.buffers[2].upload(buildings_color, GL_DYNAMIC_DRAW);
     }
-    if (state->city.instance_count > 0) {
+    if (state->floor.instance_count > 0) {
         state->city_program.use();
         state->u_city_mvp.set(mvp);
-        state->u_city_cell_size.set(float(city.cell_size));
+        state->u_city_cell_size.set(city_cell_size);
         state->u_city_light_dir.set(LIGHT_DIR);
         state->u_city_cam_pos.set(eye);
-        state->city.draw();
+        state->floor.draw();
+    }
+    if (state->buildings.instance_count > 0) {
+        state->city_program.use();
+        state->u_city_mvp.set(mvp);
+        state->u_city_cell_size.set(city_cell_size);
+        state->u_city_light_dir.set(LIGHT_DIR);
+        state->u_city_cam_pos.set(eye);
+        state->buildings.draw();
     }
 
     // Draw drones
