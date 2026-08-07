@@ -23,6 +23,8 @@ examples/<DD>-<name> -- standalone examples/demos
 - Leave git edit commands to the user, except where explicitly prompted.
 - If asked to use a worktree, put it in `./agents/<name>`
 - In general, don't generate separate headers for new components - prefer game.hpp.
+- Keep constants, state and helper function declarations hidden in cpp files where possible.
+- Don't define the same constants in multiple places - if needed by multiple cpp files, it goes into the header.
 
 ## Style
 
