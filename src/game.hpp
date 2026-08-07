@@ -72,9 +72,11 @@ struct City {
 struct GameState {
     uint64 tick;
     Vec<3> spawn;               // player respawn position
-    uint64 respawn_time;      // physics tick at which the player respawns (0 = none)
+    uint64 respawn_time;        // physics tick at which the player respawns (0 = none)
     std::vector<Drone> drones;  // player = drones[0]
     City city;
+    Vec<3> camera_pos;
+    Quat camera_orientation;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -116,8 +118,6 @@ struct Renderer {
     ~Renderer();
 
     void draw(const GameState& state, float dt);
-    Vec<3> camera_pos() const;
-    Vec<3> camera_right() const;
 
 private:
     struct State;
@@ -131,7 +131,7 @@ struct AudioEngine {
     AudioEngine();
     ~AudioEngine();
 
-    void update(const GameState& state, Vec<3> cam_pos, Vec<3> cam_right);
+    void update(const GameState& state);
     void fill_buffer(int16_t* stream, int num_samples);
 
 private:

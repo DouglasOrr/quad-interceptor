@@ -357,8 +357,6 @@ void main() {
 constexpr float FOV_DEGS = 100.0f;
 constexpr int CITY_RADIUS = 60;  // cells rendered around the player in each direction
 constexpr Vec<3> LIGHT_DIR{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
-// constexpr Vec<3> CAM_OFFSET_VEC{0.5f, 0.0f, 0.0f};  // front (cockpit)
-constexpr Vec<3> CAM_OFFSET_VEC{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
 constexpr int MINIMAP_CELLS = 20;                    // radar radius, in street cells
 constexpr int MINIMAP_SIZE = 300;                    // square side, in pixels
 
@@ -578,8 +576,6 @@ struct Renderer::State {
     int64 city_anchor_x = INT64_MAX;
     int64 city_anchor_y = INT64_MAX;
 
-    Vec<3> camera_pos{};
-    Vec<3> camera_right{1.0f, 0.0f, 0.0f};
     float fps = 0.0f;
     float fps_window = 0.0f;
     int fps_frames = 0;
@@ -688,19 +684,13 @@ void Renderer::draw(const GameState& s, float dt) {
         state->fps_frames = 0;
     }
 
-    if (!s.drones.empty()) {
-        const auto& d0 = s.drones[0];
-        state->camera_pos = d0.position + rotate(d0.orientation, CAM_OFFSET_VEC);
-        state->camera_right = rotate(d0.orientation, {0.0f, -1.0f, 0.0f});
-    }
-
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
 
     // Chase drone 0
     const Drone& d0 = s.drones[0];
-    Vec<3> eye = state->camera_pos;
+    Vec<3> eye = s.camera_pos;
     Mat4 view_mat = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
 
     // City: buildings and floor tiles
@@ -785,10 +775,4 @@ void Renderer::draw(const GameState& s, float dt) {
     state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
 }
 
-Vec<3> Renderer::camera_pos() const {
-    return state->camera_pos;
-}
 
-Vec<3> Renderer::camera_right() const {
-    return state->camera_right;
-}

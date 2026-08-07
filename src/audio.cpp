@@ -47,10 +47,10 @@ struct AudioEngine::State {
 AudioEngine::AudioEngine() : state(std::make_unique<State>()) {}
 AudioEngine::~AudioEngine() = default;
 
-void AudioEngine::update(const GameState& game_state, Vec<3> cam_pos, Vec<3> cam_right) {
+void AudioEngine::update(const GameState& game_state) {
     std::lock_guard<std::mutex> lock(state->mutex);
-    state->cam_pos = cam_pos;
-    state->cam_right = cam_right;
+    state->cam_pos = game_state.camera_pos;
+    state->cam_right = rotate(game_state.camera_orientation, {0.0f, -1.0f, 0.0f});
     size_t prev = state->drones.size();
     state->drones.resize(game_state.drones.size());
     for (size_t i = prev; i < state->drones.size(); ++i) {  // new drones: random phase

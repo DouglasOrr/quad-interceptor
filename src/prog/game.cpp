@@ -54,6 +54,6 @@ int main() {
         }
         game_manager.update(state);
         renderer.draw(state, dt);
-        audio_engine.update(state, renderer.camera_pos(), renderer.camera_right());
+        audio_engine.update(state);
     }
 }
