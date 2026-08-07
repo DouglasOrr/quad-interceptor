@@ -30,6 +30,8 @@ struct Pid {
 };
 
 struct Drone {
+    enum class Status { Alive, Crashed, Detonated };
+
     inline static constexpr float height = 0.15f;
     inline static constexpr float radius = 0.45f;
     inline static constexpr std::array<Vec<3>, 4> motor_offsets_m = {{
@@ -44,11 +46,11 @@ struct Drone {
     Vec<3> velocity;      // (world)
     Quat orientation;     // (model -> world)
     Vec<3> ang_momentum;  // (world)
-    bool alive = true;
+    Status status = Status::Alive;
 
     // Control
     Vec<4> control_m;    // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]
-    Vec<4> motor_speed;  // per-motor output (FL, FR, BL, BR) in [0, 1]
+    Vec<4> motor_speed;  // (FL, FR, BL, BR) in [0, 1]
     Pid pid_roll;
     Pid pid_pitch;
 

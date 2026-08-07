@@ -18,6 +18,8 @@ constexpr float MOTOR_MAX_FREQ = 600.0f;
 constexpr float MOTOR_FREQ_SLEW = 1000.0f;  // max pitch change, Hz per second
 constexpr float MOTOR_SPEED_GAIN_FLOOR = 0.1f;
 constexpr float MOTOR_SPEED_GAIN_SCALE = 2.0f;
+
+constexpr float DEAD_NOISE_GAIN = 4000.0f;
 }  // namespace
 
 struct AudioEngine::State {
@@ -26,7 +28,7 @@ struct AudioEngine::State {
         Vec<3> position;
         Quat orientation;
         Vec<4> motor_speed;
-        bool alive;
+        Drone::Status status = Drone::Status::Alive;
         // audio state
         std::array<float, 4> motor_phase{};
         std::array<float, 4> motor_freq{};
@@ -63,7 +65,7 @@ void AudioEngine::update(const GameState& game_state) {
         da.position = d.position;
         da.orientation = d.orientation;
         da.motor_speed = d.motor_speed;
-        da.alive = d.alive;
+        da.status = d.status;
     }
 }
 
@@ -74,7 +76,7 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
         std::array<float, 2> mix = {0.0f, 0.0f};
         for (size_t d_idx = 0; d_idx < state->drones.size(); ++d_idx) {
             auto& d = state->drones[d_idx];
-            if (!d.alive) continue;
+            if (d.status != Drone::Status::Alive) continue;
             for (int m = 0; m < 4; ++m) {
                 float speed = std::min(d.motor_speed[m], MOTOR_MAX_SPEED) / MOTOR_MAX_SPEED;
                 Vec<3> to_motor =
@@ -107,6 +109,12 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
                 mix[0] += sample * gain * (0.5f - 0.5f * pan);
                 mix[1] += sample * gain * (0.5f + 0.5f * pan);
             }
+        }
+
+        if (state->drones.size() && state->drones[0].status != Drone::Status::Alive) {
+            float n = state->next_noise();
+            mix[0] += n * DEAD_NOISE_GAIN;
+            mix[1] += n * DEAD_NOISE_GAIN;
         }
 
         stream[i * 2 + 0] = static_cast<int16_t>(std::clamp(mix[0], -32768.0f, 32767.0f));

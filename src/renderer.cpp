@@ -152,7 +152,13 @@ struct GlProgram {
     }
 
     void use() const { glUseProgram(id); }
-    Uniform uniform(const char* name) const { return {glGetUniformLocation(id, name)}; }
+    Uniform uniform(const char* name) const {
+        GLint loc = glGetUniformLocation(id, name);
+        if (loc < 0)
+            throw std::runtime_error(std::string("uniform '") + name +
+                                     "' not found in shader program");
+        return {loc};
+    }
 
 private:
     static GLuint compile(GLenum type, const char* src) {
@@ -357,8 +363,8 @@ void main() {
 constexpr float FOV_DEGS = 100.0f;
 constexpr int CITY_RADIUS = 60;  // cells rendered around the player in each direction
 constexpr Vec<3> LIGHT_DIR{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
-constexpr int MINIMAP_CELLS = 20;                    // radar radius, in street cells
-constexpr int MINIMAP_SIZE = 300;                    // square side, in pixels
+constexpr int MINIMAP_CELLS = 20;                 // radar radius, in street cells
+constexpr int MINIMAP_SIZE = 300;                 // square side, in pixels
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
 // local -z (forward) with +y up; we want forward = drone +x, up = drone +z,
@@ -542,12 +548,60 @@ void main(){
         // Drone markers
         for (size_t i = 0; i < s.drones.size(); ++i) {
             const Drone& d = s.drones[i];
-            if (!d.alive) continue;
+            if (d.status != Drone::Status::Alive) continue;
             Vec<3> color = (i == 0) ? Vec<3>{0.2f, 0.75f, 0.95f} : Vec<3>{0.95f, 0.20f, 0.20f};
             draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
         }
 
         glViewport(vp[0], vp[1], vp[2], vp[3]);
+        glEnable(GL_DEPTH_TEST);
+    }
+};
+
+// Full-screen white-noise static overlay (drawn in clip space; no camera transform).
+struct StaticOverlay {
+    GlProgram program;
+    Uniform u_time;
+    Uniform u_pixel_size;
+    Mesh quad;
+
+    StaticOverlay() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+void main(){ gl_Position = vec4(pos, 0.0, 1.0); }
+)";
+        const char* f_src = R"(
+#version 330 core
+uniform float u_time;
+uniform float u_pixel_size;
+out vec4 frag;
+float hash(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+}
+void main() {
+    vec2 block = floor(gl_FragCoord.xy / u_pixel_size) * u_pixel_size;
+    float n = hash(vec3(block, u_time));
+    frag = vec4(vec3(n), 1.0);
+}
+)";
+        program = GlProgram(v_src, f_src);
+        u_time = program.uniform("u_time");
+        u_pixel_size = program.uniform("u_pixel_size");
+        constexpr float fs_tri[] = {-1.0f, -1.0f, 3.0f, -1.0f, -1.0f, 3.0f};
+        quad.mode = GL_TRIANGLES;
+        quad.vertex_count = 3;
+        quad.add({.data = fs_tri, .bytes = sizeof(fs_tri), .loc = 0, .comps = 2});
+    }
+
+    void draw(uint time, uint pixel_size) const {
+        glDisable(GL_DEPTH_TEST);
+        program.use();
+        u_time.set(time % (1 << 20));
+        u_pixel_size.set(pixel_size);
+        quad.draw();
         glEnable(GL_DEPTH_TEST);
     }
 };
@@ -572,6 +626,9 @@ struct Renderer::State {
     Minimap minimap;
     TextBatch text;
     Mat4 projection;
+
+    StaticOverlay overlay;
+    uint static_time = 0;
 
     int64 city_anchor_x = INT64_MAX;
     int64 city_anchor_y = INT64_MAX;
@@ -678,6 +735,7 @@ void Renderer::draw(const GameState& s, float dt) {
     constexpr float period = 0.5f;
     ++state->fps_frames;
     state->fps_window += dt;
+    ++state->static_time;
     if (state->fps_window >= period) {
         state->fps = float(state->fps_frames) / state->fps_window;
         state->fps_window = 0.0f;
@@ -748,6 +806,7 @@ void Renderer::draw(const GameState& s, float dt) {
     state->program.use();
     for (size_t i = 0; i < s.drones.size(); ++i) {
         const Drone& d = s.drones[i];
+        if (d.status != Drone::Status::Alive) continue;
         auto size = 2 * Drone::radius * 1.1f;
         Mat4 model =
             mul(mat_from(d.orientation, d.position), mat_diag(size, size, Drone::height, 1));
@@ -759,6 +818,23 @@ void Renderer::draw(const GameState& s, float dt) {
 
     // Draw minimap (radar overlay)
     state->minimap.draw(s);
+
+    // Death overlay
+    if (s.drones[0].status != Drone::Status::Alive) {
+        constexpr float font_scale = 5.0f;
+        constexpr int pixel_size = 4;
+
+        state->overlay.draw(state->static_time, pixel_size);
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const char* label =
+            (s.drones[0].status == Drone::Status::Detonated) ? "detonation" : "signal lost";
+        const float text_w = float(std::strlen(label)) * state->text.font.width * font_scale;
+        const float x = float(vp[2]) / 2.0f - text_w / 2.0f;
+        const float y = float(vp[3]) / 2.0f;
+        state->text.draw(label, x, y, font_scale, {1.0f, 0.2f, 0.2f});
+    }
 
     // Draw FPS counter
     char fps_label[32];
@@ -774,5 +850,3 @@ void Renderer::draw(const GameState& s, float dt) {
 
     state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
 }
-
-

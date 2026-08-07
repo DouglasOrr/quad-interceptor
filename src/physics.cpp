@@ -114,16 +114,17 @@ void Physics::tick(GameState& state) {
         auto ang_vel_m = mul(BODY_INV_INERTIA_M, mul(Rt, d.ang_momentum));  // actual rates (model)
 
         // Collisions (building)
-        if (!d.alive || hits_building(state.city, d.position, Drone::radius)) {
-            d.alive = false;
+        if (d.status != Drone::Status::Alive) continue;  // already dead
+        if (hits_building(state.city, d.position, Drone::radius)) {
+            d.status = Drone::Status::Crashed;
             continue;
         }
 
         // Collisions (drones)
-        if (d_index != 0 && state.drones[0].alive) {
+        if (d_index != 0 && state.drones[0].status == Drone::Status::Alive) {
             if (length(d.position - state.drones[0].position) < EXPLOSION_RADIUS) {
-                d.alive = false;
-                state.drones[0].alive = false;
+                d.status = Drone::Status::Detonated;
+                state.drones[0].status = Drone::Status::Detonated;
             }
         }
 
