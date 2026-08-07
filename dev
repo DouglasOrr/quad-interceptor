@@ -225,7 +225,7 @@ def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
 def ci(variant: str) -> None:
     """run continuous integration checks"""
     build(variant, targets=())
-    run(variant, program_args=("test",))
+    run(variant, program_args=("test",), reload=False)
 
 
 @cli()
