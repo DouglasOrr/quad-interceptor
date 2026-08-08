@@ -13,6 +13,82 @@
 
 namespace {
 
+std::vector<Vec<3>> make_cube() {
+    std::vector<Vec<3>> v;
+    // 6 faces, each a unit square in the two axes perpendicular to its normal.
+    const Vec<3> corners[8] = {{-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}, {0.5f, 0.5f, -0.5f},
+                               {-0.5f, 0.5f, -0.5f},  {-0.5f, -0.5f, 0.5f}, {0.5f, -0.5f, 0.5f},
+                               {0.5f, 0.5f, 0.5f},    {-0.5f, 0.5f, 0.5f}};
+    const int faces[6][4] = {{0, 3, 2, 1}, {4, 5, 6, 7}, {0, 1, 5, 4},
+                             {2, 3, 7, 6}, {1, 2, 6, 5}, {3, 0, 4, 7}};
+    for (const auto& f : faces) {
+        v.push_back(corners[f[0]]);
+        v.push_back(corners[f[1]]);
+        v.push_back(corners[f[2]]);
+        v.push_back(corners[f[0]]);
+        v.push_back(corners[f[2]]);
+        v.push_back(corners[f[3]]);
+    }
+    return v;
+}
+
+std::vector<Vec<3>> make_cylinder(uint steps) {
+    std::vector<Vec<3>> v;
+    for (auto i = 0u; i < steps; ++i) {
+        float a0 = 2.0f * M_PIf * float(i) / float(steps);
+        float a1 = 2.0f * M_PIf * float(i + 1) / float(steps);
+        float x0 = 0.5f * std::cos(a0), y0 = 0.5f * std::sin(a0);
+        float x1 = 0.5f * std::cos(a1), y1 = 0.5f * std::sin(a1);
+        v.push_back({0, 0, 0.5f});
+        v.push_back({x0, y0, 0.5f});
+        v.push_back({x1, y1, 0.5f});
+        v.push_back({0, 0, -0.5f});
+        v.push_back({x1, y1, -0.5f});
+        v.push_back({x0, y0, -0.5f});
+        v.push_back({x0, y0, -0.5f});
+        v.push_back({x0, y0, 0.5f});
+        v.push_back({x1, y1, -0.5f});
+        v.push_back({x1, y1, -0.5f});
+        v.push_back({x0, y0, 0.5f});
+        v.push_back({x1, y1, 0.5f});
+    }
+    return v;
+}
+
+void append_vertices(std::vector<float>& dest,
+                     const std::vector<Vec<3>>& src,
+                     const std::optional<Mat4>& m = std::nullopt) {
+    for (auto p : src) {
+        Vec<4> v{p[0], p[1], p[2], 1.0f};
+        if (m) v = mul(*m, v);
+        dest.push_back(v[0]);
+        dest.push_back(v[1]);
+        dest.push_back(v[2]);
+    }
+}
+
+const char* PHONG_F_SRC = R"(
+#version 330 core
+in vec3 v_world;
+in vec3 v_color;
+out vec4 frag;
+uniform vec3 u_light_dir;
+uniform vec3 u_cam_pos;
+const vec3 u_ambient = vec3(0.22);
+const vec3 u_diffuse = vec3(0.70);
+const vec3 u_specular = vec3(0.30);
+const float u_shininess = 32.0;
+void main(){
+  vec3 N = normalize(cross(dFdx(v_world), dFdy(v_world)));
+  vec3 L = normalize(u_light_dir);
+  vec3 V = normalize(u_cam_pos - v_world);
+  vec3 H = normalize(L + V);
+  float diff = max(dot(N, L), 0.0);
+  float spec = diff > 0.0 ? pow(max(dot(N, H), 0.0), u_shininess) : 0.0;
+  frag = vec4(v_color * (u_ambient + u_diffuse * diff) + u_specular * spec, 1.0);
+}
+)";
+
 // unit cube (centered at origin, side length 1)
 constexpr float CUBE[] = {
     -0.5f, -0.5f, -0.5f, -0.5f, 0.5f,  -0.5f, -0.5f, 0.5f,  0.5f,  -0.5f, -0.5f, -0.5f,
@@ -619,6 +695,13 @@ struct Renderer::State {
     Uniform u_city_light_dir;
     Uniform u_city_cam_pos;
 
+    GlProgram drone_program;
+    Uniform u_drone_mvp;
+    Uniform u_drone_model;
+    Uniform u_drone_color;
+    Uniform u_drone_light_dir;
+    Uniform u_drone_cam_pos;
+
     Mesh drone;
     Mesh floor;
     Mesh buildings;
@@ -655,9 +738,33 @@ void main(){ frag = vec4(u_color, 1.0); }
     state->program = GlProgram(v_src, f_src);
     state->u_mvp = state->program.uniform("u_mvp");
     state->u_color = state->program.uniform("u_color");
-    state->drone.vertex_count = 36;
+    // Drone mesh
+    std::vector<float> drone_verts;
+    auto cube = make_cube();
+    auto cyl = make_cylinder(16);
+    // Deliberately draw slightly bigger, so crashes seem generous
+    float rr = Drone::radius * 1.2, hh = Drone::height;
+    for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
+        Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
+        Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),
+                         mat_diag(rr * 2, hh * 0.5f, hh * 0.5f, 1.0f));
+        append_vertices(drone_verts, cube, model);
+    }
+    append_vertices(drone_verts, cube, mat_diag(rr * 0.5f, rr * 0.5f, hh * 0.5f, 1.0f));
+    float oo = rr / sqrtf(2);
+    const std::array<Vec<3>, 4> offsets = {
+        {{oo, oo, 0}, {oo, -oo, 0}, {-oo, oo, 0}, {-oo, -oo, 0}}};
+    for (const auto& offset : offsets) {
+        Mat4 scale = mat_diag(rr * 0.2f, rr * 0.2f, hh, 1.0f);
+        Mat4 model = mul(mat_rigid(mat_from(Quat{1, 0, 0, 0}), offset), scale);
+        append_vertices(drone_verts, cyl, model);
+    }
     state->drone.mode = GL_TRIANGLES;
-    state->drone.add({.data = CUBE, .bytes = sizeof(CUBE), .loc = 0, .comps = 3});
+    state->drone.vertex_count = static_cast<GLsizei>(drone_verts.size() / 3);
+    state->drone.add({.data = drone_verts.data(),
+                      .bytes = static_cast<GLsizeiptr>(drone_verts.size() * sizeof(float)),
+                      .loc = 0,
+                      .comps = 3});
 
     // Per-instance city program: each instance carries the cell corner world x/y + height
     // (loc 1) and a grey shade (loc 2); the unit cube is scaled/raised from that corner.
@@ -679,30 +786,29 @@ void main(){
   v_color = inst_color;
 }
 )";
-    const char* city_f_src = R"(
+    state->city_program = GlProgram(city_v_src, PHONG_F_SRC);
+    state->u_city_mvp = state->city_program.uniform("u_mvp");
+
+    const char* drone_v_src = R"(
 #version 330 core
-in vec3 v_world;
-in vec3 v_color;
-out vec4 frag;
-uniform vec3 u_light_dir;
-uniform vec3 u_cam_pos;
-const vec3 u_ambient = vec3(0.22);
-const vec3 u_diffuse = vec3(0.70);
-const vec3 u_specular = vec3(0.30);
-const float u_shininess = 32.0;
+layout(location=0) in vec3 pos;
+uniform mat4 u_mvp;
+uniform mat4 u_model;
+uniform vec3 u_color;
+out vec3 v_world;
+out vec3 v_color;
 void main(){
-  // Flat per-face normal, recovered from fragment derivatives of world position.
-  vec3 N = normalize(cross(dFdx(v_world), dFdy(v_world)));
-  vec3 L = normalize(u_light_dir);
-  vec3 V = normalize(u_cam_pos - v_world);
-  vec3 H = normalize(L + V);
-  float diff = max(dot(N, L), 0.0);
-  float spec = diff > 0.0 ? pow(max(dot(N, H), 0.0), u_shininess) : 0.0;
-  frag = vec4(v_color * (u_ambient + u_diffuse * diff) + u_specular * spec, 1.0);
+  gl_Position = u_mvp * vec4(pos, 1.0);
+  v_world = (u_model * vec4(pos, 1.0)).xyz;
+  v_color = u_color;
 }
 )";
-    state->city_program = GlProgram(city_v_src, city_f_src);
-    state->u_city_mvp = state->city_program.uniform("u_mvp");
+    state->drone_program = GlProgram(drone_v_src, PHONG_F_SRC);
+    state->u_drone_mvp = state->drone_program.uniform("u_mvp");
+    state->u_drone_model = state->drone_program.uniform("u_model");
+    state->u_drone_color = state->drone_program.uniform("u_color");
+    state->u_drone_light_dir = state->drone_program.uniform("u_light_dir");
+    state->u_drone_cam_pos = state->drone_program.uniform("u_cam_pos");
     state->u_city_cell_size = state->city_program.uniform("u_city_cell_size");
     state->u_city_light_dir = state->city_program.uniform("u_light_dir");
     state->u_city_cam_pos = state->city_program.uniform("u_cam_pos");
@@ -803,16 +909,18 @@ void Renderer::draw(const GameState& s, float dt) {
     }
 
     // Draw drones
-    state->program.use();
+    state->drone_program.use();
+    state->u_drone_light_dir.set(LIGHT_DIR);
+    state->u_drone_cam_pos.set(eye);
     for (size_t i = 0; i < s.drones.size(); ++i) {
         const Drone& d = s.drones[i];
         if (d.status != Drone::Status::Alive) continue;
-        auto size = 2 * Drone::radius * 1.1f;
-        Mat4 model =
-            mul(mat_from(d.orientation, d.position), mat_diag(size, size, Drone::height, 1));
+        Vec<3> col = (i == 0) ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f};
+        Mat4 model = mat_from(d.orientation, d.position);
         Mat4 mvp = mul(state->projection, mul(view_mat, model));
-        state->u_mvp.set(mvp);
-        state->u_color.set(i == 0 ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f});
+        state->u_drone_mvp.set(mvp);
+        state->u_drone_model.set(model);
+        state->u_drone_color.set(col);
         state->drone.draw();
     }
 
