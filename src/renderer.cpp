@@ -672,13 +672,51 @@ void main() {
         quad.add({.data = fs_tri, .bytes = sizeof(fs_tri), .loc = 0, .comps = 2});
     }
 
-    void draw(uint time, uint pixel_size) const {
+    void draw(uint time, const GameState& s, TextBatch& text) const {
         glDisable(GL_DEPTH_TEST);
         program.use();
         u_time.set(time % (1 << 20));
-        u_pixel_size.set(pixel_size);
+        u_pixel_size.set(4.0f);
         quad.draw();
         glEnable(GL_DEPTH_TEST);
+
+        constexpr float font_scale = 5.0f;
+        const char* label =
+            (s.drones[0].status == Drone::Status::Detonated) ? "detonation" : "signal lost";
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float text_w = float(std::strlen(label)) * text.font.width * font_scale;
+        const float x = float(vp[2]) / 2.0f - text_w / 2.0f;
+        const float y = float(vp[3]) / 2.0f;
+        text.draw(label, x, y, font_scale, {1.0f, 0.2f, 0.2f});
+    }
+};
+
+// Frame-rate counter: samples over a window and draws it top-right.
+struct FpsView {
+    static constexpr float period = 0.5f;
+    float fps = 0.0f;
+    float window = 0.0f;
+    int frames = 0;
+
+    void draw(float dt, TextBatch& text) {
+        ++frames;
+        window += dt;
+        if (window >= period) {
+            fps = float(frames) / window;
+            window = 0.0f;
+            frames = 0;
+        }
+        char label[32];
+        std::snprintf(label, sizeof(label), "%d FPS", int(fps));
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float scale = 1.5f;
+        const float margin = 8.0f;
+        const float text_w = float(std::strlen(label)) * text.font.width * scale;
+        const float x = float(vp[2]) - margin - text_w;
+        const float top_y = float(vp[3]) - margin - text.font.height * scale;
+        text.draw(label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
     }
 };
 
@@ -875,35 +913,15 @@ struct Renderer::State {
     CityView city;
     DroneView drone;
     MinimapView minimap;
+    NoiseOverlayView overlay;
+    FpsView fps;
     TextBatch text;
     Mat4 projection;
 
-    NoiseOverlayView overlay;
     uint static_time = 0;
-
-    float fps = 0.0f;
-    float fps_window = 0.0f;
-    int fps_frames = 0;
 };
 
 Renderer::Renderer() : state(std::make_unique<State>()) {
-    const char* v_src = R"(
-#version 330 core
-layout(location=0) in vec3 pos;
-uniform mat4 u_mvp;
-void main(){ gl_Position = u_mvp * vec4(pos, 1.0); }
-)";
-    const char* f_src = R"(
-#version 330 core
-out vec4 frag;
-uniform vec3 u_color;
-void main(){ frag = vec4(u_color, 1.0); }
-)";
-
-    state->program = GlProgram(v_src, f_src);
-    state->u_mvp = state->program.uniform("u_mvp");
-    state->u_color = state->program.uniform("u_color");
-
     state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
     // Default state
@@ -915,21 +933,11 @@ void main(){ frag = vec4(u_color, 1.0); }
 Renderer::~Renderer() = default;
 
 void Renderer::draw(const GameState& s, float dt) {
-    constexpr float period = 0.5f;
-    ++state->fps_frames;
-    state->fps_window += dt;
     ++state->static_time;
-    if (state->fps_window >= period) {
-        state->fps = float(state->fps_frames) / state->fps_window;
-        state->fps_window = 0.0f;
-        state->fps_frames = 0;
-    }
 
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
-    GLint vp[4];
-    glGetIntegerv(GL_VIEWPORT, vp);
 
     // Camera view
     Mat4 view_mat =
@@ -942,26 +950,7 @@ void Renderer::draw(const GameState& s, float dt) {
 
     // Overlays
     state->minimap.draw(s);
-    if (s.drones[0].status != Drone::Status::Alive) {
-        state->overlay.draw(state->static_time, /*pixel_size*/ 4);
-        constexpr float font_scale = 5.0f;
-        const char* label =
-            (s.drones[0].status == Drone::Status::Detonated) ? "detonation" : "signal lost";
-        const float text_w = float(std::strlen(label)) * state->text.font.width * font_scale;
-        const float x = float(vp[2]) / 2.0f - text_w / 2.0f;
-        const float y = float(vp[3]) / 2.0f;
-        state->text.draw(label, x, y, font_scale, {1.0f, 0.2f, 0.2f});
-    }
-    {  // FPS
-        char fps_label[32];
-        std::snprintf(fps_label, sizeof(fps_label), "%d FPS", int(state->fps));
-
-        const float scale = 1.5f;
-        const float margin = 8.0f;
-        const float text_w = float(std::strlen(fps_label)) * state->text.font.width * scale;
-        const float x = float(vp[2]) - margin - text_w;
-        const float top_y = float(vp[3]) - margin - state->text.font.height * scale;
-
-        state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
-    }
+    if (s.drones[0].status != Drone::Status::Alive)
+        state->overlay.draw(state->static_time, s, state->text);
+    state->fps.draw(dt, state->text);
 }
