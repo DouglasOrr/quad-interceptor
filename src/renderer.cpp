@@ -13,6 +13,10 @@
 
 namespace {
 
+constexpr Vec<3> grey(float v) {
+    return {v, v, v};
+}
+
 std::vector<Vec<3>> make_cube() {
     std::vector<Vec<3>> v;
     // 6 faces, each a unit square in the two axes perpendicular to its normal.
@@ -74,10 +78,10 @@ in vec3 v_color;
 out vec4 frag;
 uniform vec3 u_light_dir;
 uniform vec3 u_cam_pos;
-const vec3 u_ambient = vec3(0.22);
-const vec3 u_diffuse = vec3(0.70);
-const vec3 u_specular = vec3(0.30);
-const float u_shininess = 32.0;
+uniform vec3 u_ambient;
+uniform vec3 u_diffuse;
+uniform vec3 u_specular;
+uniform float u_shininess;
 void main(){
   vec3 N = normalize(cross(dFdx(v_world), dFdy(v_world)));
   vec3 L = normalize(u_light_dir);
@@ -432,6 +436,30 @@ void main() {
     }
 };
 
+// Phong surface shading. The material owns its property values and their
+// uniform locations; init() queries them from a program, use() binds them
+// before drawing. color is supplied separately (per-instance or u_color).
+struct PhongMaterial {
+    Vec<3> ambient;
+    Vec<3> diffuse;
+    Vec<3> specular;
+    float shininess;
+    Uniform u_ambient{}, u_diffuse{}, u_specular{}, u_shininess{};
+
+    void init(const GlProgram& program) {
+        u_ambient = program.uniform("u_ambient");
+        u_diffuse = program.uniform("u_diffuse");
+        u_specular = program.uniform("u_specular");
+        u_shininess = program.uniform("u_shininess");
+    }
+    void use() const {
+        u_ambient.set(ambient);
+        u_diffuse.set(diffuse);
+        u_specular.set(specular);
+        u_shininess.set(shininess);
+    }
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // Renderer impl
 
@@ -729,6 +757,14 @@ struct CityView {
     Uniform u_cam_pos;
     Mesh floor;
     Mesh buildings;
+    PhongMaterial floor_mat{.ambient = grey(0.1),
+                            .diffuse = grey(0.9),
+                            .specular = grey(0.1),
+                            .shininess = 5};
+    PhongMaterial building_mat{.ambient = grey(0.2),
+                               .diffuse = grey(0.7),
+                               .specular = grey(0.5),
+                               .shininess = 50};
     int64 anchor_x = INT64_MAX;
     int64 anchor_y = INT64_MAX;
 
@@ -756,6 +792,8 @@ void main(){
         u_cell_size = program.uniform("u_cell_size");
         u_light_dir = program.uniform("u_light_dir");
         u_cam_pos = program.uniform("u_cam_pos");
+        floor_mat.init(program);
+        building_mat.init(program);
 
         buildings.mode = GL_TRIANGLES;
         buildings.vertex_count = 36;
@@ -810,6 +848,7 @@ void main(){
             program.use();
             u_mvp.set(view_projection_mat);
             u_cell_size.set(cell);
+            floor_mat.use();
             u_light_dir.set(LIGHT_DIR);
             u_cam_pos.set(eye);
             floor.draw();
@@ -818,6 +857,7 @@ void main(){
             program.use();
             u_mvp.set(view_projection_mat);
             u_cell_size.set(cell);
+            building_mat.use();
             u_light_dir.set(LIGHT_DIR);
             u_cam_pos.set(eye);
             buildings.draw();
@@ -834,6 +874,14 @@ struct DroneView {
     Uniform u_light_dir;
     Uniform u_cam_pos;
     Mesh mesh;
+    PhongMaterial player_mat{.ambient = grey(0.15),
+                             .diffuse = grey(0.8),
+                             .specular = grey(0.2),
+                             .shininess = 20};
+    PhongMaterial enemy_mat{.ambient = grey(0.65),
+                            .diffuse = grey(0.35),
+                            .specular = grey(0.1),
+                            .shininess = 20};
 
     DroneView() {
         const char* v_src = R"(
@@ -856,6 +904,8 @@ void main(){
         u_color = program.uniform("u_color");
         u_light_dir = program.uniform("u_light_dir");
         u_cam_pos = program.uniform("u_cam_pos");
+        player_mat.init(program);
+        enemy_mat.init(program);
 
         std::vector<float> verts;
         auto cube = make_cube();
@@ -892,12 +942,16 @@ void main(){
         for (size_t i = 0; i < s.drones.size(); ++i) {
             const Drone& d = s.drones[i];
             if (d.status != Drone::Status::Alive) continue;
-            Vec<3> col = (i == 0) ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f};
-            Mat4 model = mat_from(d.orientation, d.position);
+            const bool enemy = (i != 0);
+            Vec<3> col = enemy ? Vec<3>{0.8f, 0.3f, 0.3f} : Vec<3>{0.3f, 0.3f, 0.8f};
+            float scale = enemy ? 2.0f : 1.0f;
+            Mat4 model = mul(mat_rigid(mat_from(d.orientation), d.position),
+                             mat_diag(scale, scale, scale, 1.0f));
             Mat4 mvp = mul(view_projection_mat, model);
             u_mvp.set(mvp);
             u_model.set(model);
             u_color.set(col);
+            (enemy ? enemy_mat : player_mat).use();
             mesh.draw();
         }
     }
