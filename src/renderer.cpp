@@ -682,6 +682,111 @@ void main() {
     }
 };
 
+// Instanced city geometry (buildings + floor tiles)
+struct CityView {
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_cell_size;
+    Uniform u_light_dir;
+    Uniform u_cam_pos;
+    Mesh floor;
+    Mesh buildings;
+    int64 anchor_x = INT64_MAX;
+    int64 anchor_y = INT64_MAX;
+
+    CityView() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 inst_world;   // x, y, height
+layout(location=2) in vec3 inst_color;
+uniform mat4 u_mvp;
+uniform float u_cell_size;
+out vec3 v_world;
+out vec3 v_color;
+void main(){
+  vec3 scale = vec3(u_cell_size, u_cell_size, inst_world.z);
+  vec3 world = vec3(inst_world.x, inst_world.y, 0.0);
+  vec3 p = world + scale * (pos + 0.5);
+  gl_Position = u_mvp * vec4(p, 1.0);
+  v_world = p;
+  v_color = inst_color;
+}
+)";
+        program = GlProgram(v_src, PHONG_F_SRC);
+        u_mvp = program.uniform("u_mvp");
+        u_cell_size = program.uniform("u_cell_size");
+        u_light_dir = program.uniform("u_light_dir");
+        u_cam_pos = program.uniform("u_cam_pos");
+
+        buildings.mode = GL_TRIANGLES;
+        buildings.vertex_count = 36;
+        buildings.instance_count = 0;
+        buildings.add({.data = CUBE, .bytes = sizeof(CUBE), .loc = 0, .comps = 3});
+        buildings.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
+        buildings.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+
+        floor.mode = GL_TRIANGLES;
+        floor.vertex_count = 6;
+        floor.instance_count = 0;
+        floor.add({.data = QUAD3, .bytes = sizeof(QUAD3), .loc = 0, .comps = 3});
+        floor.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
+        floor.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+    }
+
+    void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye) {
+        const City& city = s.city;
+        const float cell = city.cell_size;
+        const Drone& d0 = s.drones[0];
+        const int64 ax = static_cast<int64>(std::floor(d0.position[0] / cell));
+        const int64 ay = static_cast<int64>(std::floor(d0.position[1] / cell));
+        if (ax != anchor_x || ay != anchor_y) {
+            anchor_x = ax;
+            anchor_y = ay;
+            std::vector<float> floor_world, floor_color;
+            std::vector<float> buildings_world, buildings_color;
+            for (int64 dy = -CITY_RADIUS; dy <= CITY_RADIUS; ++dy) {
+                for (int64 dx = -CITY_RADIUS; dx <= CITY_RADIUS; ++dx) {
+                    Cell c = city(ax + dx, ay + dy);
+                    float wx = float(ax + dx) * cell;
+                    float wy = float(ay + dy) * cell;
+                    if (c.height > 0.0f) {
+                        float k = float((c.hash >> 32) & 0xff) / 255.0f;
+                        float shade = 0.2f + 0.2f * k;
+                        buildings_world.insert(buildings_world.end(), {wx, wy, c.height});
+                        buildings_color.insert(buildings_color.end(), {shade, shade, shade});
+                    } else {
+                        floor_world.insert(floor_world.end(), {wx, wy, 0.0f});
+                        floor_color.insert(floor_color.end(), {0.15f, 0.15f, 0.15f});
+                    }
+                }
+            }
+            floor.instance_count = static_cast<GLsizei>(floor_world.size() / 3);
+            floor.buffers[1].upload(floor_world, GL_DYNAMIC_DRAW);
+            floor.buffers[2].upload(floor_color, GL_DYNAMIC_DRAW);
+            buildings.instance_count = static_cast<GLsizei>(buildings_world.size() / 3);
+            buildings.buffers[1].upload(buildings_world, GL_DYNAMIC_DRAW);
+            buildings.buffers[2].upload(buildings_color, GL_DYNAMIC_DRAW);
+        }
+        if (floor.instance_count > 0) {
+            program.use();
+            u_mvp.set(view_projection_mat);
+            u_cell_size.set(cell);
+            u_light_dir.set(LIGHT_DIR);
+            u_cam_pos.set(eye);
+            floor.draw();
+        }
+        if (buildings.instance_count > 0) {
+            program.use();
+            u_mvp.set(view_projection_mat);
+            u_cell_size.set(cell);
+            u_light_dir.set(LIGHT_DIR);
+            u_cam_pos.set(eye);
+            buildings.draw();
+        }
+    }
+};
+
 // Drone static mesh
 struct DroneView {
     GlProgram program;
@@ -767,25 +872,14 @@ struct Renderer::State {
     Uniform u_mvp;
     Uniform u_color;
 
-    GlProgram city_program;
-    Uniform u_city_mvp;
-    Uniform u_city_cell_size;
-    Uniform u_city_light_dir;
-    Uniform u_city_cam_pos;
-
+    CityView city;
     DroneView drone;
-    Mesh floor;
-    Mesh buildings;
-
     MinimapView minimap;
     TextBatch text;
     Mat4 projection;
 
     NoiseOverlayView overlay;
     uint static_time = 0;
-
-    int64 city_anchor_x = INT64_MAX;
-    int64 city_anchor_y = INT64_MAX;
 
     float fps = 0.0f;
     float fps_window = 0.0f;
@@ -809,47 +903,6 @@ void main(){ frag = vec4(u_color, 1.0); }
     state->program = GlProgram(v_src, f_src);
     state->u_mvp = state->program.uniform("u_mvp");
     state->u_color = state->program.uniform("u_color");
-
-    // Per-instance city program: each instance carries the cell corner world x/y + height
-    // (loc 1) and a grey shade (loc 2); the unit cube is scaled/raised from that corner.
-    const char* city_v_src = R"(
-#version 330 core
-layout(location=0) in vec3 pos;
-layout(location=1) in vec3 inst_world;   // x, y, height
-layout(location=2) in vec3 inst_color;
-uniform mat4 u_mvp;
-uniform float u_city_cell_size;
-out vec3 v_world;
-out vec3 v_color;
-void main(){
-  vec3 scale = vec3(u_city_cell_size, u_city_cell_size, inst_world.z);
-  vec3 world = vec3(inst_world.x, inst_world.y, 0.0);
-  vec3 p = world + scale * (pos + 0.5);
-  gl_Position = u_mvp * vec4(p, 1.0);
-  v_world = p;
-  v_color = inst_color;
-}
-)";
-    state->city_program = GlProgram(city_v_src, PHONG_F_SRC);
-    state->u_city_mvp = state->city_program.uniform("u_mvp");
-
-    state->u_city_cell_size = state->city_program.uniform("u_city_cell_size");
-    state->u_city_light_dir = state->city_program.uniform("u_light_dir");
-    state->u_city_cam_pos = state->city_program.uniform("u_cam_pos");
-
-    state->buildings.mode = GL_TRIANGLES;
-    state->buildings.vertex_count = 36;
-    state->buildings.instance_count = 0;
-    state->buildings.add({.data = CUBE, .bytes = sizeof(CUBE), .loc = 0, .comps = 3});
-    state->buildings.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
-    state->buildings.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
-
-    state->floor.mode = GL_TRIANGLES;
-    state->floor.vertex_count = 6;
-    state->floor.instance_count = 0;
-    state->floor.add({.data = QUAD3, .bytes = sizeof(QUAD3), .loc = 0, .comps = 3});
-    state->floor.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
-    state->floor.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
 
     state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
@@ -875,78 +928,23 @@ void Renderer::draw(const GameState& s, float dt) {
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
+    GLint vp[4];
+    glGetIntegerv(GL_VIEWPORT, vp);
 
     // Camera view
-    const Drone& d0 = s.drones[0];
-    Vec<3> eye = s.camera_pos;
-    Mat4 view_mat = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
+    Mat4 view_mat =
+        rigid_inverse(mul(mat_from(s.drones[0].orientation, s.camera_pos), CAM_ROTATION));
     Mat4 view_projection_mat = mul(state->projection, view_mat);
 
-    // City: buildings and floor tiles
-    const City& city = s.city;
-    const float city_cell_size = city.cell_size;
-    const int64 ax = static_cast<int64>(std::floor(d0.position[0] / city_cell_size));
-    const int64 ay = static_cast<int64>(std::floor(d0.position[1] / city_cell_size));
-    if (ax != state->city_anchor_x || ay != state->city_anchor_y) {
-        state->city_anchor_x = ax;
-        state->city_anchor_y = ay;
-        std::vector<float> floor_world, floor_color;
-        std::vector<float> buildings_world, buildings_color;
-        for (int64 dy = -CITY_RADIUS; dy <= CITY_RADIUS; ++dy) {
-            for (int64 dx = -CITY_RADIUS; dx <= CITY_RADIUS; ++dx) {
-                Cell c = city(ax + dx, ay + dy);
-                float wx = float(ax + dx) * city_cell_size;
-                float wy = float(ay + dy) * city_cell_size;
-                if (c.height > 0.0f) {
-                    float k = float((c.hash >> 32) & 0xff) / 255.0f;
-                    float shade = 0.2f + 0.2f * k;
-                    buildings_world.insert(buildings_world.end(), {wx, wy, c.height});
-                    buildings_color.insert(buildings_color.end(), {shade, shade, shade});
-                } else {
-                    floor_world.insert(floor_world.end(), {wx, wy, 0.0f});
-                    floor_color.insert(floor_color.end(), {0.15f, 0.15f, 0.15f});
-                }
-            }
-        }
-        state->floor.instance_count = static_cast<GLsizei>(floor_world.size() / 3);
-        state->floor.buffers[1].upload(floor_world, GL_DYNAMIC_DRAW);
-        state->floor.buffers[2].upload(floor_color, GL_DYNAMIC_DRAW);
-        state->buildings.instance_count = static_cast<GLsizei>(buildings_world.size() / 3);
-        state->buildings.buffers[1].upload(buildings_world, GL_DYNAMIC_DRAW);
-        state->buildings.buffers[2].upload(buildings_color, GL_DYNAMIC_DRAW);
-    }
-    if (state->floor.instance_count > 0) {
-        state->city_program.use();
-        state->u_city_mvp.set(view_projection_mat);
-        state->u_city_cell_size.set(city_cell_size);
-        state->u_city_light_dir.set(LIGHT_DIR);
-        state->u_city_cam_pos.set(eye);
-        state->floor.draw();
-    }
-    if (state->buildings.instance_count > 0) {
-        state->city_program.use();
-        state->u_city_mvp.set(view_projection_mat);
-        state->u_city_cell_size.set(city_cell_size);
-        state->u_city_light_dir.set(LIGHT_DIR);
-        state->u_city_cam_pos.set(eye);
-        state->buildings.draw();
-    }
+    // Scene
+    state->city.draw(s, view_projection_mat, s.camera_pos);
+    state->drone.draw(s, view_projection_mat, s.camera_pos);
 
-    // Draw drones
-    state->drone.draw(s, view_projection_mat, eye);
-
-    // Draw minimap (radar overlay)
+    // Overlays
     state->minimap.draw(s);
-
-    // Death overlay
     if (s.drones[0].status != Drone::Status::Alive) {
+        state->overlay.draw(state->static_time, /*pixel_size*/ 4);
         constexpr float font_scale = 5.0f;
-        constexpr int pixel_size = 4;
-
-        state->overlay.draw(state->static_time, pixel_size);
-
-        GLint vp[4];
-        glGetIntegerv(GL_VIEWPORT, vp);
         const char* label =
             (s.drones[0].status == Drone::Status::Detonated) ? "detonation" : "signal lost";
         const float text_w = float(std::strlen(label)) * state->text.font.width * font_scale;
@@ -954,18 +952,16 @@ void Renderer::draw(const GameState& s, float dt) {
         const float y = float(vp[3]) / 2.0f;
         state->text.draw(label, x, y, font_scale, {1.0f, 0.2f, 0.2f});
     }
+    {  // FPS
+        char fps_label[32];
+        std::snprintf(fps_label, sizeof(fps_label), "%d FPS", int(state->fps));
 
-    // Draw FPS counter
-    char fps_label[32];
-    std::snprintf(fps_label, sizeof(fps_label), "%d FPS", int(state->fps));
+        const float scale = 1.5f;
+        const float margin = 8.0f;
+        const float text_w = float(std::strlen(fps_label)) * state->text.font.width * scale;
+        const float x = float(vp[2]) - margin - text_w;
+        const float top_y = float(vp[3]) - margin - state->text.font.height * scale;
 
-    const float scale = 1.5f;
-    const float margin = 8.0f;
-    GLint vp[4];
-    glGetIntegerv(GL_VIEWPORT, vp);
-    const float text_w = float(std::strlen(fps_label)) * state->text.font.width * scale;
-    const float x = float(vp[2]) - margin - text_w;
-    const float top_y = float(vp[3]) - margin - state->text.font.height * scale;
-
-    state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
+        state->text.draw(fps_label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
+    }
 }
