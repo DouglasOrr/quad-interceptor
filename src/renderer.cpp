@@ -455,7 +455,7 @@ constexpr Mat4 CAM_ROTATION = {
 };
 
 // Radar-style minimap overlay.
-struct Minimap {
+struct MinimapView {
     GlProgram program;
     Uniform u_mvp;
     Uniform u_color;
@@ -472,7 +472,7 @@ struct Minimap {
     Uniform g_band_half;
     Mesh grid;
 
-    Minimap() {
+    MinimapView() {
         const char* v_src = R"(
 #version 330 core
 layout(location=0) in vec2 pos;
@@ -635,13 +635,13 @@ void main(){
 };
 
 // Full-screen white-noise static overlay (drawn in clip space; no camera transform).
-struct StaticOverlay {
+struct NoiseOverlayView {
     GlProgram program;
     Uniform u_time;
     Uniform u_pixel_size;
     Mesh quad;
 
-    StaticOverlay() {
+    NoiseOverlayView() {
         const char* v_src = R"(
 #version 330 core
 layout(location=0) in vec2 pos;
@@ -682,6 +682,84 @@ void main() {
     }
 };
 
+// Drone static mesh
+struct DroneView {
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_model;
+    Uniform u_color;
+    Uniform u_light_dir;
+    Uniform u_cam_pos;
+    Mesh mesh;
+
+    DroneView() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec3 pos;
+uniform mat4 u_mvp;
+uniform mat4 u_model;
+uniform vec3 u_color;
+out vec3 v_world;
+out vec3 v_color;
+void main(){
+  gl_Position = u_mvp * vec4(pos, 1.0);
+  v_world = (u_model * vec4(pos, 1.0)).xyz;
+  v_color = u_color;
+}
+)";
+        program = GlProgram(v_src, PHONG_F_SRC);
+        u_mvp = program.uniform("u_mvp");
+        u_model = program.uniform("u_model");
+        u_color = program.uniform("u_color");
+        u_light_dir = program.uniform("u_light_dir");
+        u_cam_pos = program.uniform("u_cam_pos");
+
+        std::vector<float> verts;
+        auto cube = make_cube();
+        auto cyl = make_cylinder(16);
+        // Deliberately draw slightly bigger, so crashes seem generous
+        float rr = Drone::radius * 1.2, hh = Drone::height;
+        for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
+            Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
+            Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),
+                             mat_diag(rr * 2, hh * 0.5f, hh * 0.5f, 1.0f));
+            append_vertices(verts, cube, model);
+        }
+        append_vertices(verts, cube, mat_diag(rr * 0.5f, rr * 0.5f, hh * 0.5f, 1.0f));
+        float oo = rr / sqrtf(2);
+        const std::array<Vec<3>, 4> offsets = {
+            {{oo, oo, 0}, {oo, -oo, 0}, {-oo, oo, 0}, {-oo, -oo, 0}}};
+        for (const auto& offset : offsets) {
+            Mat4 scale = mat_diag(rr * 0.2f, rr * 0.2f, hh, 1.0f);
+            Mat4 model = mul(mat_rigid(mat_from(Quat{1, 0, 0, 0}), offset), scale);
+            append_vertices(verts, cyl, model);
+        }
+        mesh.mode = GL_TRIANGLES;
+        mesh.vertex_count = static_cast<GLsizei>(verts.size() / 3);
+        mesh.add({.data = verts.data(),
+                  .bytes = static_cast<GLsizeiptr>(verts.size() * sizeof(float)),
+                  .loc = 0,
+                  .comps = 3});
+    }
+
+    void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye) {
+        program.use();
+        u_light_dir.set(LIGHT_DIR);
+        u_cam_pos.set(eye);
+        for (size_t i = 0; i < s.drones.size(); ++i) {
+            const Drone& d = s.drones[i];
+            if (d.status != Drone::Status::Alive) continue;
+            Vec<3> col = (i == 0) ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f};
+            Mat4 model = mat_from(d.orientation, d.position);
+            Mat4 mvp = mul(view_projection_mat, model);
+            u_mvp.set(mvp);
+            u_model.set(model);
+            u_color.set(col);
+            mesh.draw();
+        }
+    }
+};
+
 }  // namespace
 
 struct Renderer::State {
@@ -695,22 +773,15 @@ struct Renderer::State {
     Uniform u_city_light_dir;
     Uniform u_city_cam_pos;
 
-    GlProgram drone_program;
-    Uniform u_drone_mvp;
-    Uniform u_drone_model;
-    Uniform u_drone_color;
-    Uniform u_drone_light_dir;
-    Uniform u_drone_cam_pos;
-
-    Mesh drone;
+    DroneView drone;
     Mesh floor;
     Mesh buildings;
 
-    Minimap minimap;
+    MinimapView minimap;
     TextBatch text;
     Mat4 projection;
 
-    StaticOverlay overlay;
+    NoiseOverlayView overlay;
     uint static_time = 0;
 
     int64 city_anchor_x = INT64_MAX;
@@ -738,33 +809,6 @@ void main(){ frag = vec4(u_color, 1.0); }
     state->program = GlProgram(v_src, f_src);
     state->u_mvp = state->program.uniform("u_mvp");
     state->u_color = state->program.uniform("u_color");
-    // Drone mesh
-    std::vector<float> drone_verts;
-    auto cube = make_cube();
-    auto cyl = make_cylinder(16);
-    // Deliberately draw slightly bigger, so crashes seem generous
-    float rr = Drone::radius * 1.2, hh = Drone::height;
-    for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
-        Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
-        Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),
-                         mat_diag(rr * 2, hh * 0.5f, hh * 0.5f, 1.0f));
-        append_vertices(drone_verts, cube, model);
-    }
-    append_vertices(drone_verts, cube, mat_diag(rr * 0.5f, rr * 0.5f, hh * 0.5f, 1.0f));
-    float oo = rr / sqrtf(2);
-    const std::array<Vec<3>, 4> offsets = {
-        {{oo, oo, 0}, {oo, -oo, 0}, {-oo, oo, 0}, {-oo, -oo, 0}}};
-    for (const auto& offset : offsets) {
-        Mat4 scale = mat_diag(rr * 0.2f, rr * 0.2f, hh, 1.0f);
-        Mat4 model = mul(mat_rigid(mat_from(Quat{1, 0, 0, 0}), offset), scale);
-        append_vertices(drone_verts, cyl, model);
-    }
-    state->drone.mode = GL_TRIANGLES;
-    state->drone.vertex_count = static_cast<GLsizei>(drone_verts.size() / 3);
-    state->drone.add({.data = drone_verts.data(),
-                      .bytes = static_cast<GLsizeiptr>(drone_verts.size() * sizeof(float)),
-                      .loc = 0,
-                      .comps = 3});
 
     // Per-instance city program: each instance carries the cell corner world x/y + height
     // (loc 1) and a grey shade (loc 2); the unit cube is scaled/raised from that corner.
@@ -789,26 +833,6 @@ void main(){
     state->city_program = GlProgram(city_v_src, PHONG_F_SRC);
     state->u_city_mvp = state->city_program.uniform("u_mvp");
 
-    const char* drone_v_src = R"(
-#version 330 core
-layout(location=0) in vec3 pos;
-uniform mat4 u_mvp;
-uniform mat4 u_model;
-uniform vec3 u_color;
-out vec3 v_world;
-out vec3 v_color;
-void main(){
-  gl_Position = u_mvp * vec4(pos, 1.0);
-  v_world = (u_model * vec4(pos, 1.0)).xyz;
-  v_color = u_color;
-}
-)";
-    state->drone_program = GlProgram(drone_v_src, PHONG_F_SRC);
-    state->u_drone_mvp = state->drone_program.uniform("u_mvp");
-    state->u_drone_model = state->drone_program.uniform("u_model");
-    state->u_drone_color = state->drone_program.uniform("u_color");
-    state->u_drone_light_dir = state->drone_program.uniform("u_light_dir");
-    state->u_drone_cam_pos = state->drone_program.uniform("u_cam_pos");
     state->u_city_cell_size = state->city_program.uniform("u_city_cell_size");
     state->u_city_light_dir = state->city_program.uniform("u_light_dir");
     state->u_city_cam_pos = state->city_program.uniform("u_cam_pos");
@@ -852,13 +876,13 @@ void Renderer::draw(const GameState& s, float dt) {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
 
-    // Chase drone 0
+    // Camera view
     const Drone& d0 = s.drones[0];
     Vec<3> eye = s.camera_pos;
     Mat4 view_mat = rigid_inverse(mul(mat_from(d0.orientation, eye), CAM_ROTATION));
+    Mat4 view_projection_mat = mul(state->projection, view_mat);
 
     // City: buildings and floor tiles
-    Mat4 mvp = mul(state->projection, view_mat);
     const City& city = s.city;
     const float city_cell_size = city.cell_size;
     const int64 ax = static_cast<int64>(std::floor(d0.position[0] / city_cell_size));
@@ -893,7 +917,7 @@ void Renderer::draw(const GameState& s, float dt) {
     }
     if (state->floor.instance_count > 0) {
         state->city_program.use();
-        state->u_city_mvp.set(mvp);
+        state->u_city_mvp.set(view_projection_mat);
         state->u_city_cell_size.set(city_cell_size);
         state->u_city_light_dir.set(LIGHT_DIR);
         state->u_city_cam_pos.set(eye);
@@ -901,7 +925,7 @@ void Renderer::draw(const GameState& s, float dt) {
     }
     if (state->buildings.instance_count > 0) {
         state->city_program.use();
-        state->u_city_mvp.set(mvp);
+        state->u_city_mvp.set(view_projection_mat);
         state->u_city_cell_size.set(city_cell_size);
         state->u_city_light_dir.set(LIGHT_DIR);
         state->u_city_cam_pos.set(eye);
@@ -909,20 +933,7 @@ void Renderer::draw(const GameState& s, float dt) {
     }
 
     // Draw drones
-    state->drone_program.use();
-    state->u_drone_light_dir.set(LIGHT_DIR);
-    state->u_drone_cam_pos.set(eye);
-    for (size_t i = 0; i < s.drones.size(); ++i) {
-        const Drone& d = s.drones[i];
-        if (d.status != Drone::Status::Alive) continue;
-        Vec<3> col = (i == 0) ? Vec<3>{0.3f, 0.3f, 0.8f} : Vec<3>{0.8f, 0.3f, 0.3f};
-        Mat4 model = mat_from(d.orientation, d.position);
-        Mat4 mvp = mul(state->projection, mul(view_mat, model));
-        state->u_drone_mvp.set(mvp);
-        state->u_drone_model.set(model);
-        state->u_drone_color.set(col);
-        state->drone.draw();
-    }
+    state->drone.draw(s, view_projection_mat, eye);
 
     // Draw minimap (radar overlay)
     state->minimap.draw(s);
