@@ -882,6 +882,8 @@ struct DroneView {
                             .diffuse = grey(0.35),
                             .specular = grey(0.1),
                             .shininess = 20};
+    Mat4 player_scale = mat_diag(1.0f, 1.0f, 1.0f, 1.0f);
+    Mat4 enemy_scale = mat_diag(1.5f, 1.5f, 2.5f, 1.0f);
 
     DroneView() {
         const char* v_src = R"(
@@ -944,9 +946,8 @@ void main(){
             if (d.status != Drone::Status::Alive) continue;
             const bool enemy = (i != 0);
             Vec<3> col = enemy ? Vec<3>{0.8f, 0.3f, 0.3f} : Vec<3>{0.3f, 0.3f, 0.8f};
-            float scale = enemy ? 2.0f : 1.0f;
             Mat4 model = mul(mat_rigid(mat_from(d.orientation), d.position),
-                             mat_diag(scale, scale, scale, 1.0f));
+                             enemy ? enemy_scale : player_scale);
             Mat4 mvp = mul(view_projection_mat, model);
             u_mvp.set(mvp);
             u_model.set(model);
