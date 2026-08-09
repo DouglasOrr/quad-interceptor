@@ -35,10 +35,10 @@ struct Drone {
     inline static constexpr float height = 0.15f;
     inline static constexpr float radius = 0.45f;
     inline static constexpr std::array<Vec<3>, 4> motor_offsets_m = {{
-        {{0.1f, 0.1f, 0.0f}},    // FL
-        {{0.1f, -0.1f, 0.0f}},   // FR
-        {{-0.1f, 0.1f, 0.0f}},   // BL
-        {{-0.1f, -0.1f, 0.0f}},  // BR
+        {{radius / M_SQRT2f, radius / M_SQRT2f, 0.0f}},    // FL
+        {{radius / M_SQRT2f, -radius / M_SQRT2f, 0.0f}},   // FR
+        {{-radius / M_SQRT2f, radius / M_SQRT2f, 0.0f}},   // BL
+        {{-radius / M_SQRT2f, -radius / M_SQRT2f, 0.0f}},  // BR
     }};
 
     // State

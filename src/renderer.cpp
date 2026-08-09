@@ -882,7 +882,7 @@ struct DroneView {
                             .diffuse = grey(0.35),
                             .specular = grey(0.1),
                             .shininess = 20};
-    Mat4 player_scale = mat_diag(1.0f, 1.0f, 1.0f, 1.0f);
+    Mat4 player_scale = mat_diag(1.2f, 1.2f, 1.2f, 1.0f);
     Mat4 enemy_scale = mat_diag(1.5f, 1.5f, 2.5f, 1.0f);
 
     DroneView() {
@@ -912,8 +912,7 @@ void main(){
         std::vector<float> verts;
         auto cube = make_cube();
         auto cyl = make_cylinder(16);
-        // Deliberately draw slightly bigger, so crashes seem generous
-        float rr = Drone::radius * 1.2, hh = Drone::height;
+        float rr = Drone::radius, hh = Drone::height;
         for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
             Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
             Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),

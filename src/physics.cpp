@@ -12,9 +12,9 @@ constexpr Vec<3> GRAVITY = {0.0f, 0.0f, -10.0f};
 // Drone
 constexpr float BODY_MASS = 1.0f;
 constexpr Mat3 DAMPING_M = mat_diag(0.2f, 0.2f, 1.0f);
-constexpr Mat3 BODY_INV_INERTIA_M = mat_diag(1.0f, 1.0f, 5.0f);
-constexpr float MOTOR_FORCE = 6.0f;
-constexpr float MOTOR_TORQUE = 0.2f;
+constexpr Mat3 BODY_INV_INERTIA_M = mat_diag(0.4f, 0.4f, 1.5f);
+constexpr float MOTOR_FORCE = 8.0f;
+constexpr float MOTOR_TORQUE = 0.6f;
 constexpr Mat3 ANG_DAMPING_M = mat_diag(0.4f, 0.4f, 0.4f);
 
 // Drone control - PID settings
