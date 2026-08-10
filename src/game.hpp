@@ -46,7 +46,8 @@ struct Drone {
     Vec<3> velocity;      // (world)
     Quat orientation;     // (model -> world)
     Vec<3> ang_momentum;  // (world)
-    Status status = Status::Alive;
+    Status status;
+    float lock_on;
 
     // Control
     Vec<4> control_m;    // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]

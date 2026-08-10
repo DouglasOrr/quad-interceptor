@@ -24,6 +24,9 @@ constexpr float PID_KI = 3.0f;
 constexpr float PID_KD = 0.0f;
 
 constexpr float EXPLOSION_RADIUS = 5.0f;
+constexpr float LOCK_ON_LEVEL = 80.0f;
+constexpr float LOCK_ON_RATE = 1 / 15.0f;
+constexpr float LOCK_ON_RESET_RATE = 1 / 30.0f;
 
 // City
 constexpr Vec<2> CITY_BUILDING_HEIGHT_RANGE = {10.0f, 100.0f};
@@ -101,7 +104,10 @@ Drone Drone::create(Vec<3> position) {
     d.velocity = {};
     d.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
     d.ang_momentum = {};
+    d.status = Drone::Status::Alive;
+    d.lock_on = 0;
     d.control_m = {};
+    d.motor_speed = {};
     return d;
 }
 
@@ -118,6 +124,19 @@ void Physics::tick(GameState& state) {
         if (hits_building(state.city, d.position, Drone::radius)) {
             d.status = Drone::Status::Crashed;
             continue;
+        }
+
+        // Alitutude-based lock-on death (player only)
+        if (d_index == 0) {
+            if (d.position[2] > LOCK_ON_LEVEL) {
+                d.lock_on += LOCK_ON_RATE * dt;
+                if (d.lock_on >= 1.0f) {
+                    d.status = Drone::Status::Crashed;
+                    continue;
+                }
+            } else {
+                d.lock_on = std::max(0.0f, d.lock_on - LOCK_ON_RESET_RATE * dt);
+            }
         }
 
         // Collisions (drones)

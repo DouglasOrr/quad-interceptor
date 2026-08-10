@@ -487,15 +487,18 @@ struct MinimapView {
     GlProgram program;
     Uniform u_mvp;
     Uniform u_color;
+    Uniform u_alpha;
     Uniform u_translate;
     Uniform u_scale;
     Uniform u_radius;
+    Uniform u_inner;
     Mesh disc;
     Mesh ring;
 
     GlProgram grid_program;
     Uniform g_mvp;
     Uniform g_color;
+    Uniform g_alpha;
     Uniform g_radius;
     Uniform g_band_half;
     Mesh grid;
@@ -538,22 +541,28 @@ void main(){
 in vec2 v_local;
 uniform vec3 u_color;
 uniform float u_radius;
+uniform float u_inner;
+uniform float u_alpha;
 out vec4 frag;
 void main(){
   if (dot(v_local, v_local) > u_radius * u_radius) discard;
-  frag = vec4(u_color, 1.0);
+  if (dot(v_local, v_local) < u_inner * u_inner) discard;
+  frag = vec4(u_color, u_alpha);
 }
 )";
         program = GlProgram(v_src, f_src);
         u_mvp = program.uniform("u_mvp");
         u_color = program.uniform("u_color");
+        u_alpha = program.uniform("u_alpha");
         u_translate = program.uniform("u_translate");
         u_scale = program.uniform("u_scale");
         u_radius = program.uniform("u_radius");
+        u_inner = program.uniform("u_inner");
 
         grid_program = GlProgram(grid_v_src, f_src);
         g_mvp = grid_program.uniform("u_mvp");
         g_color = grid_program.uniform("u_color");
+        g_alpha = grid_program.uniform("u_alpha");
         g_radius = grid_program.uniform("u_radius");
         g_band_half = grid_program.uniform("u_band_half");
 
@@ -636,18 +645,13 @@ void main(){
             g_radius.set(R);
             g_band_half.set(band_half);
             g_color.set(Vec<3>{0.08f, 0.12f, 0.15f});
+            g_alpha.set(1.0f);
             grid.instance_count = static_cast<GLsizei>(bands.size() / 2);
             grid.draw();
         }
         program.use();
-
-        // Concentric radar rings
-        u_translate.set(Vec<2>{0.0f, 0.0f});
-        u_color.set(Vec<3>{0.1f, 0.4f, 0.5f});
-        for (float r : {R, 2.0f * R / 3.0f, R / 3.0f}) {
-            u_scale.set(r);
-            ring.draw();
-        }
+        u_alpha.set(1.0f);
+        u_inner.set(0.0f);
 
         // Drone markers
         for (size_t i = 0; i < s.drones.size(); ++i) {
@@ -655,6 +659,30 @@ void main(){
             if (d.status != Drone::Status::Alive) continue;
             Vec<3> color = (i == 0) ? Vec<3>{0.2f, 0.75f, 0.95f} : Vec<3>{0.95f, 0.20f, 0.20f};
             draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
+        }
+
+        // Lock-on annulus
+        if (s.drones[0].lock_on > 0.0f) {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            u_translate.set(Vec<2>{0.0f, 0.0f});
+            u_scale.set(R);
+            u_radius.set(R);
+            u_inner.set(std::max(0.0f, 1.0f - s.drones[0].lock_on) * R);
+            u_alpha.set(0.2f);
+            u_color.set(Vec<3>{0.9f, 0.1f, 0.1f});
+            disc.draw();
+            glDisable(GL_BLEND);
+            u_alpha.set(1.0f);
+            u_inner.set(0.0f);
+        }
+
+        // Concentric radar rings
+        u_translate.set(Vec<2>{0.0f, 0.0f});
+        u_color.set(Vec<3>{0.1f, 0.4f, 0.5f});
+        for (float r : {R, 2.0f * R / 3.0f, R / 3.0f}) {
+            u_scale.set(r);
+            ring.draw();
         }
 
         glViewport(vp[0], vp[1], vp[2], vp[3]);
