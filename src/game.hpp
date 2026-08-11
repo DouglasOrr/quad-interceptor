@@ -10,6 +10,8 @@
 
 #include "maths.hpp"
 
+struct Window;  // defined in platform.hpp
+
 // Always-on assertion; overrides the standard `assert` so it stays active in
 // release builds (which define NDEBUG).
 [[noreturn]] inline void gg_assert_fail(const char* expr, const char* file, int line) {
@@ -88,6 +90,8 @@ struct GameState {
 struct GameManager {
     void update(GameState& state);
 };
+
+void game_loop(Window& window);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Physics
