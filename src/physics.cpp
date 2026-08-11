@@ -121,7 +121,7 @@ void Physics::tick(GameState& state) {
 
         // Collisions (building)
         if (d.status != Drone::Status::Alive) continue;  // already dead
-        if (hits_building(state.city, d.position, Drone::radius)) {
+        if (hits_building(state.city, d.position, Drone::collision_radius)) {
             d.status = Drone::Status::Crashed;
             continue;
         }

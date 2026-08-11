@@ -35,12 +35,13 @@ struct Drone {
     enum class Status { Alive, Crashed, Detonated };
 
     inline static constexpr float height = 0.15f;
-    inline static constexpr float radius = 0.45f;
+    inline static constexpr float collision_radius = 0.4f;
+    inline static constexpr float _radius = 0.5f;
     inline static constexpr std::array<Vec<3>, 4> motor_offsets_m = {{
-        {{radius / M_SQRT2f, radius / M_SQRT2f, 0.0f}},    // FL
-        {{radius / M_SQRT2f, -radius / M_SQRT2f, 0.0f}},   // FR
-        {{-radius / M_SQRT2f, radius / M_SQRT2f, 0.0f}},   // BL
-        {{-radius / M_SQRT2f, -radius / M_SQRT2f, 0.0f}},  // BR
+        {{_radius / M_SQRT2f, _radius / M_SQRT2f, 0.0f}},    // FL
+        {{_radius / M_SQRT2f, -_radius / M_SQRT2f, 0.0f}},   // FR
+        {{-_radius / M_SQRT2f, _radius / M_SQRT2f, 0.0f}},   // BL
+        {{-_radius / M_SQRT2f, -_radius / M_SQRT2f, 0.0f}},  // BR
     }};
 
     // State

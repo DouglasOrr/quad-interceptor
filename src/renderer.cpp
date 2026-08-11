@@ -1035,7 +1035,7 @@ struct DroneView {
     Mesh mesh;
     DronePropView prop;
     DroneMaterials mat;
-    Mat4 player_scale = mat_diag(1.2f, 1.2f, 1.2f, 1.0f);
+    Mat4 player_scale = mat_diag(1.0f, 1.0f, 1.0f, 1.0f);
     Mat4 enemy_scale = mat_diag(1.5f, 1.5f, 2.5f, 1.0f);
 
     DroneView() {
@@ -1064,7 +1064,8 @@ void main(){
         std::vector<float> verts;
         auto cube = make_cube();
         auto cyl = make_cylinder(16);
-        float rr = Drone::radius, hh = Drone::height;
+        float rr = 0.5f * length(Drone::motor_offsets_m[0] - Drone::motor_offsets_m[3]);
+        float hh = Drone::height;
         for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
             Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
             Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),
@@ -1072,11 +1073,8 @@ void main(){
             append_vertices(verts, cube, model);
         }
         append_vertices(verts, cube, mat_diag(rr * 0.5f, rr * 0.5f, hh * 0.5f, 1.0f));
-        float oo = rr / sqrtf(2);
-        const std::array<Vec<3>, 4> offsets = {
-            {{oo, oo, 0}, {oo, -oo, 0}, {-oo, oo, 0}, {-oo, -oo, 0}}};
-        for (const auto& offset : offsets) {
-            Mat4 scale = mat_diag(rr * 0.2f, rr * 0.2f, hh, 1.0f);
+        for (const auto& offset : Drone::motor_offsets_m) {
+            Mat4 scale = mat_diag(hh * 0.6f, hh * 0.6f, hh, 1.0f);
             Mat4 model = mul(mat_rigid(mat_from(Quat{1, 0, 0, 0}), offset), scale);
             append_vertices(verts, cyl, model);
         }
