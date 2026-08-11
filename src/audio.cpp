@@ -7,19 +7,19 @@
 #include "platform.hpp"
 
 namespace {
-constexpr float ATTEN_NEAR = 0.5f;  // linear distance term
-constexpr float ATTEN_FAR = 0.05f;  // quadratic distance term
+constexpr float atten_near = 0.5f;  // linear distance term
+constexpr float atten_far = 0.05f;  // quadratic distance term
 
 // Motor sound synthesis
-constexpr float MOTOR_BASE_GAIN = 4000.0f;
-constexpr float MOTOR_MAX_SPEED = 0.7f;  // motor speed at which pitch, etc is maxed out
-constexpr float MOTOR_BASE_FREQ = 250.0f;
-constexpr float MOTOR_MAX_FREQ = 600.0f;
-constexpr float MOTOR_FREQ_SLEW = 1000.0f;  // max pitch change, Hz per second
-constexpr float MOTOR_SPEED_GAIN_FLOOR = 0.1f;
-constexpr float MOTOR_SPEED_GAIN_SCALE = 2.0f;
+constexpr float motor_base_gain = 4000.0f;
+constexpr float motor_max_speed = 0.7f;  // motor speed at which pitch, etc is maxed out
+constexpr float motor_base_freq = 250.0f;
+constexpr float motor_max_freq = 600.0f;
+constexpr float motor_freq_slew = 1000.0f;  // max pitch change, Hz per second
+constexpr float motor_speed_gain_floor = 0.1f;
+constexpr float motor_speed_gain_scale = 2.0f;
 
-constexpr float DEAD_NOISE_GAIN = 4000.0f;
+constexpr float dead_noise_gain = 4000.0f;
 }  // namespace
 
 struct AudioEngine::State {
@@ -78,15 +78,15 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
             auto& d = state->drones[d_idx];
             if (d.status != Drone::Status::Alive) continue;
             for (int m = 0; m < 4; ++m) {
-                float speed = std::min(d.motor_speed[m], MOTOR_MAX_SPEED) / MOTOR_MAX_SPEED;
+                float speed = std::min(d.motor_speed[m], motor_max_speed) / motor_max_speed;
                 Vec<3> to_motor =
                     d.position + rotate(d.orientation, Drone::motor_offsets_m[m]) - state->cam_pos;
                 float dist = length(to_motor);
 
                 // Gain & pan
-                float gain = MOTOR_BASE_GAIN;
-                gain *= 1.0f / (1 + ATTEN_NEAR * dist + ATTEN_FAR * dist * dist);
-                gain *= std::min(1.0f, speed * MOTOR_SPEED_GAIN_SCALE + MOTOR_SPEED_GAIN_FLOOR);
+                float gain = motor_base_gain;
+                gain *= 1.0f / (1 + atten_near * dist + atten_far * dist * dist);
+                gain *= std::min(1.0f, speed * motor_speed_gain_scale + motor_speed_gain_floor);
                 float pan = 0.0f;
                 if (dist > 1e-4f) {
                     pan = dot(to_motor, state->cam_right) / dist;
@@ -94,9 +94,9 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
                 pan = std::clamp(pan, -1.0f, 1.0f);
 
                 // Slew the frequency toward its target so pitch changes gradually.
-                float target = MOTOR_BASE_FREQ + speed * (MOTOR_MAX_FREQ - MOTOR_BASE_FREQ);
+                float target = motor_base_freq + speed * (motor_max_freq - motor_base_freq);
                 float& freq = d.motor_freq[m];
-                float step = MOTOR_FREQ_SLEW / float(Window::audio_sample_rate);
+                float step = motor_freq_slew / float(Window::audio_sample_rate);
                 freq += std::clamp(target - freq, -step, step);
                 auto& phase = d.motor_phase[m];
                 phase += freq / float(Window::audio_sample_rate);
@@ -113,8 +113,8 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
 
         if (state->drones.size() && state->drones[0].status != Drone::Status::Alive) {
             float n = state->next_noise();
-            mix[0] += n * DEAD_NOISE_GAIN;
-            mix[1] += n * DEAD_NOISE_GAIN;
+            mix[0] += n * dead_noise_gain;
+            mix[1] += n * dead_noise_gain;
         }
 
         stream[i * 2 + 0] = static_cast<int16_t>(std::clamp(mix[0], -32768.0f, 32767.0f));

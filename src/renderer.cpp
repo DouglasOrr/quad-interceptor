@@ -464,18 +464,18 @@ struct PhongMaterial {
 // Renderer impl
 
 // Scene constants.
-constexpr float FOV_DEGS = 100.0f;
-constexpr int CITY_RADIUS = 60;  // cells rendered around the player in each direction
-constexpr Vec<3> LIGHT_DIR{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
-constexpr int MINIMAP_CELLS = 20;                 // radar radius, in street cells
-constexpr int MINIMAP_SIZE = 300;                 // square side, in pixels
+constexpr float fov_deg = 100.0f;
+constexpr int city_radius = 60;  // cells rendered around the player in each direction
+constexpr Vec<3> light_dir{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
+constexpr int minimap_cells = 20;                 // radar radius, in street cells
+constexpr int minimap_size = 300;                 // square side, in pixels
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
 // local -z (forward) with +y up; we want forward = drone +x, up = drone +z,
 // right = drone -y. Equivalently a 120-degree rotation about (1,-1,-1)/sqrt3.
 // Stored column-major: col0 = right = -drone_y, col1 = up = drone_z,
 // col2 = backward (+z_cam) = -drone_x.
-constexpr Mat4 CAM_ROTATION = {
+constexpr Mat4 cam_rotation = {
     0.0f,  -1.0f, 0.0f, 0.0f,  // col0: right  = drone -y
     0.0f,  0.0f,  1.0f, 0.0f,  // col1: up     = drone +z
     -1.0f, 0.0f,  0.0f, 0.0f,  // col2: back   = drone -x
@@ -592,14 +592,14 @@ void main(){
     }
 
     void draw(const GameState& s) {
-        const float R = float(City::cell_size) * MINIMAP_CELLS;
-        const float px_to_world = 2.0f * R / float(MINIMAP_SIZE);  // 1px radius -> world scale
+        const float R = float(City::cell_size) * minimap_cells;
+        const float px_to_world = 2.0f * R / float(minimap_size);  // 1px radius -> world scale
 
         const Vec<3>& p = s.drones[0].position;
 
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
-        glViewport(vp[2] - MINIMAP_SIZE - 16, 16, MINIMAP_SIZE, MINIMAP_SIZE);
+        glViewport(vp[2] - minimap_size - 16, 16, minimap_size, minimap_size);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
 
@@ -849,8 +849,8 @@ void main(){
             anchor_y = ay;
             std::vector<float> floor_world, floor_color;
             std::vector<float> buildings_world, buildings_color;
-            for (int64 dy = -CITY_RADIUS; dy <= CITY_RADIUS; ++dy) {
-                for (int64 dx = -CITY_RADIUS; dx <= CITY_RADIUS; ++dx) {
+            for (int64 dy = -city_radius; dy <= city_radius; ++dy) {
+                for (int64 dx = -city_radius; dx <= city_radius; ++dx) {
                     Cell c = city(ax + dx, ay + dy);
                     float wx = float(ax + dx) * cell;
                     float wy = float(ay + dy) * cell;
@@ -877,7 +877,7 @@ void main(){
             u_mvp.set(view_projection_mat);
             u_cell_size.set(cell);
             floor_mat.use();
-            u_light_dir.set(LIGHT_DIR);
+            u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
             floor.draw();
         }
@@ -886,7 +886,7 @@ void main(){
             u_mvp.set(view_projection_mat);
             u_cell_size.set(cell);
             building_mat.use();
-            u_light_dir.set(LIGHT_DIR);
+            u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
             buildings.draw();
         }
@@ -1017,7 +1017,7 @@ void main(){
         u_mvp.set(mvp);
         u_model.set(model);
         u_color.set(col);
-        u_light_dir.set(LIGHT_DIR);
+        u_light_dir.set(light_dir);
         u_cam_pos.set(eye);
         mat.get(enemy).use();
         mesh.draw();
@@ -1099,7 +1099,7 @@ void main(){
                              enemy ? enemy_scale : player_scale);
             Mat4 mvp = mul(view_projection_mat, model);
             program.use();
-            u_light_dir.set(LIGHT_DIR);
+            u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
             u_mvp.set(mvp);
             u_model.set(model);
@@ -1130,7 +1130,7 @@ struct Renderer::State {
 };
 
 Renderer::Renderer() : state(std::make_unique<State>()) {
-    state->projection = mat_perspective(FOV_DEGS * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
+    state->projection = mat_perspective(fov_deg * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
 
     // Default state
     glEnable(GL_DEPTH_TEST);
@@ -1149,7 +1149,7 @@ void Renderer::draw(const GameState& s, float dt) {
 
     // Camera view
     Mat4 view_mat =
-        rigid_inverse(mul(mat_from(s.drones[0].orientation, s.camera_pos), CAM_ROTATION));
+        rigid_inverse(mul(mat_from(s.drones[0].orientation, s.camera_pos), cam_rotation));
     Mat4 view_projection_mat = mul(state->projection, view_mat);
 
     // Scene
