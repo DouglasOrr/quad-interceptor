@@ -24,7 +24,6 @@ constexpr float pid_ki = 3.0f;
 constexpr float pid_kd = 0.0f;
 
 constexpr float explosion_radius = 5.0f;
-constexpr float lock_on_level = 80.0f;
 constexpr float lock_on_rate = 1 / 15.0f;
 constexpr float lock_on_reset_rate = 1 / 30.0f;
 
@@ -128,7 +127,7 @@ void Physics::tick(GameState& state) {
 
         // Alitutude-based lock-on death (player only)
         if (d_index == 0) {
-            if (d.position[2] > lock_on_level) {
+            if (d.position[2] > Drone::lock_on_level) {
                 d.lock_on += lock_on_rate * dt;
                 if (d.lock_on >= 1.0f) {
                     d.status = Drone::Status::Crashed;

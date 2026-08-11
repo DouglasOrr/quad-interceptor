@@ -690,6 +690,132 @@ void main(){
     }
 };
 
+// Flight HUD view.
+struct HudView {
+    GlProgram program;
+    Uniform u_radius;
+    Uniform u_pitch;
+    Uniform u_roll;
+    Mesh quad;
+
+    HudView() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+uniform float u_radius;
+out vec2 v_local;
+void main(){
+  vec2 p = pos * (2.0 * u_radius);
+  v_local = p;
+  gl_Position = vec4(pos * 2.0, 0.0, 1.0);
+}
+)";
+        const char* f_src = R"(
+#version 330 core
+in vec2 v_local;
+uniform float u_radius;
+uniform float u_pitch;
+uniform float u_roll;
+out vec4 frag;
+void main(){
+  float dist2 = dot(v_local, v_local);
+  if (dist2 > u_radius * u_radius) discard;
+  if (dist2 > (u_radius - 1.25) * (u_radius - 1.25)) {
+    frag = vec4(0.2, 0.75, 0.95, 1.0);
+    return;
+  }
+
+  // Center boresight crosshair (+)
+  if ((abs(v_local.x) < 10.0 && abs(v_local.y) < 2.0 && abs(v_local.x) > 3.0) ||
+      (abs(v_local.y) < 10.0 && abs(v_local.x) < 2.0 && abs(v_local.y) > 3.0)) {
+    frag = vec4(0.2, 0.75, 0.95, 1.0);
+    return;
+  }
+
+  float c = cos(u_roll);
+  float s = sin(u_roll);
+  vec2 rot_p = vec2(c * v_local.x - s * v_local.y, s * v_local.x + c * v_local.y);
+
+  float pitch_offset = u_pitch * (u_radius / 1.570796);
+  float y_rel = rot_p.y - pitch_offset;
+
+  if (abs(y_rel) < 0.75) {
+    frag = vec4(0.65, 0.65, 0.65, 1.0);
+  } else if (y_rel < 0.0) {
+    frag = vec4(0.14, 0.09, 0.06, 1.0);
+  } else {
+    frag = vec4(0.10, 0.25, 0.40, 0.95);
+  }
+}
+)";
+        program = GlProgram(v_src, f_src);
+        u_radius = program.uniform("u_radius");
+        u_pitch = program.uniform("u_pitch");
+        u_roll = program.uniform("u_roll");
+
+        quad.mode = GL_TRIANGLES;
+        quad.vertex_count = 6;
+        quad.add({.data = QUAD2C, .bytes = sizeof(QUAD2C), .loc = 0, .comps = 2});
+    }
+
+    void draw(const GameState& s, TextBatch& text) {
+        const Drone& d = s.drones[0];
+        const uint attitude_size = 140;
+
+        // Draw the attitude indicator as a circle in the lower-left
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        glViewport(16, 16, attitude_size, attitude_size);
+        glDisable(GL_DEPTH_TEST);
+        glDepthMask(GL_FALSE);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        const auto R_mat = mat_from(d.orientation);
+        float pitch = std::asin(std::clamp(R_mat[2, 0], -1.0f, 1.0f));
+        float roll = std::atan2(-R_mat[2, 1], R_mat[2, 2]);
+
+        program.use();
+        u_radius.set(attitude_size / 2);
+        u_pitch.set(pitch);
+        u_roll.set(roll);
+        quad.draw();
+
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+        glViewport(vp[0], vp[1], vp[2], vp[3]);
+        glEnable(GL_DEPTH_TEST);
+
+        // Text readouts to the right of the attitude indicator
+        char buf[64];
+        const float text_x = 16.0f + attitude_size + 24.0f;
+        const float text_y0 = 24.0f;
+        const float scale = 1.1f;
+        const float line_h = text.font.height * scale * 1.5f;
+
+        int p_v = int(std::round((pitch * 180.0f / M_PIf) / 5.0f)) * 5;
+        int r_v = int(std::round((roll * 180.0f / M_PIf) / 5.0f)) * 5;
+        std::snprintf(buf, sizeof(buf), "P/R %+3d %+1d", p_v, r_v);
+        text.draw(buf, text_x, text_y0 + line_h * 1.0f, scale, {1.0f, 1.0f, 1.0f});
+
+        int alt_v = int(std::round(d.position[2]));
+        Vec<3> alt_col = {1.0f, 1.0f, 1.0f};
+        if (d.position[2] >= Drone::lock_on_level) {
+            alt_col = {1.0f, 0.2f, 0.2f};
+        } else if (d.position[2] >= Drone::lock_on_level - 10.0f) {
+            alt_col = {1.0f, 0.6f, 0.0f};
+        }
+        int vs_v = int(std::round(d.velocity[2]));
+        std::snprintf(buf, sizeof(buf), "ALT %3d %+1d", alt_v, vs_v);
+        text.draw(buf, text_x, text_y0 + line_h * 2.0f, scale, alt_col);
+
+        int spd_v = int(
+            std::round(std::sqrt(d.velocity[0] * d.velocity[0] + d.velocity[1] * d.velocity[1])));
+        std::snprintf(buf, sizeof(buf), "SPD %3d", spd_v);
+        text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, {1.0f, 1.0f, 1.0f});
+    }
+};
+
 // Full-screen white-noise static overlay (drawn in clip space; no camera transform).
 struct NoiseOverlayView {
     GlProgram program;
@@ -1119,6 +1245,7 @@ struct Renderer::State {
     CityView city;
     DroneView drone;
     MinimapView minimap;
+    HudView hud;
     NoiseOverlayView overlay;
     FpsView fps;
     TextBatch text;
@@ -1156,6 +1283,7 @@ void Renderer::draw(const GameState& s, float dt) {
 
     // Overlays
     state->minimap.draw(s);
+    state->hud.draw(s, state->text);
     if (s.drones[0].status != Drone::Status::Alive)
         state->overlay.draw(state->static_time, s, state->text);
     state->fps.draw(dt, state->text);

@@ -37,6 +37,7 @@ struct Drone {
     inline static constexpr float height = 0.15f;
     inline static constexpr float collision_radius = 0.4f;
     inline static constexpr float _radius = 0.5f;
+    inline static constexpr float lock_on_level = 80.0f;
     inline static constexpr std::array<Vec<3>, 4> motor_offsets_m = {{
         {{_radius / M_SQRT2f, _radius / M_SQRT2f, 0.0f}},    // FL
         {{_radius / M_SQRT2f, -_radius / M_SQRT2f, 0.0f}},   // FR
