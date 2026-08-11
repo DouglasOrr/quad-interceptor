@@ -1150,6 +1150,87 @@ void main(){
     }
 };
 
+// Drone lateral speed indicator lights (6 unlit pips on inner body cube: 3 left, 3 right)
+struct DroneLightsView {
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_lat_vel;
+    Mesh mesh;
+
+    DroneLightsView() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 inst_local_pos;
+layout(location=2) in float inst_threshold;
+uniform mat4 u_mvp;
+uniform float u_lat_vel;
+out vec3 v_color;
+void main(){
+  vec3 p = inst_local_pos + pos * vec3(0.014, 0.014, 0.007);
+  gl_Position = u_mvp * vec4(p, 1.0);
+  bool lit = (inst_threshold > 0.0 && u_lat_vel >= inst_threshold) ||
+             (inst_threshold < 0.0 && u_lat_vel <= inst_threshold);
+  v_color = lit ? vec3(1.0, 0.15, 0.15) : vec3(0.25, 0.25, 0.25);
+}
+)";
+        const char* f_src = R"(
+#version 330 core
+in vec3 v_color;
+out vec4 frag;
+void main(){
+  frag = vec4(v_color, 1.0);
+}
+)";
+        program = GlProgram(v_src, f_src);
+        u_mvp = program.uniform("u_mvp");
+        u_lat_vel = program.uniform("u_lat_vel");
+
+        auto cube_verts = make_cube();
+        mesh.mode = GL_TRIANGLES;
+        mesh.vertex_count = static_cast<GLsizei>(cube_verts.size());
+        mesh.add({.data = cube_verts.data(),
+                  .bytes = static_cast<GLsizeiptr>(cube_verts.size() * sizeof(Vec<3>)),
+                  .loc = 0,
+                  .comps = 3});
+
+        struct Pip {
+            float x, y, z, threshold;
+        };
+        const Pip pips[6] = {{-0.22f, 0.03f, 0.10f, 4.0f},   {-0.22f, 0.06f, 0.10f, 8.0f},
+                             {-0.22f, 0.09f, 0.10f, 12.0f},  {-0.22f, -0.03f, 0.10f, -4.0f},
+                             {-0.22f, -0.06f, 0.10f, -8.0f}, {-0.22f, -0.09f, 0.10f, -12.0f}};
+        std::vector<float> inst_pos;
+        std::vector<float> inst_thresh;
+        for (const auto& p : pips) {
+            inst_pos.insert(inst_pos.end(), {p.x, p.y, p.z});
+            inst_thresh.push_back(p.threshold);
+        }
+
+        mesh.add({.data = inst_pos.data(),
+                  .bytes = static_cast<GLsizeiptr>(inst_pos.size() * sizeof(float)),
+                  .loc = 1,
+                  .comps = 3,
+                  .divisor = true});
+        mesh.add({.data = inst_thresh.data(),
+                  .bytes = static_cast<GLsizeiptr>(inst_thresh.size() * sizeof(float)),
+                  .loc = 2,
+                  .comps = 1,
+                  .divisor = true});
+        mesh.instance_count = 6;
+    }
+
+    void draw(const Mat4& mvp, const Drone& d) {
+        auto R = mat_from(d.orientation);
+        auto Rt = transpose(R);
+        Vec<3> vel_body = mul(Rt, d.velocity);
+        program.use();
+        u_mvp.set(mvp);
+        u_lat_vel.set(vel_body[1]);  // + = left, - = right
+        mesh.draw();
+    }
+};
+
 // Drone static mesh
 struct DroneView {
     GlProgram program;
@@ -1160,6 +1241,7 @@ struct DroneView {
     Uniform u_cam_pos;
     Mesh mesh;
     DronePropView prop;
+    DroneLightsView lights;
     DroneMaterials mat;
     Mat4 player_scale = mat_diag(1.0f, 1.0f, 1.0f, 1.0f);
     Mat4 enemy_scale = mat_diag(1.5f, 1.5f, 2.5f, 1.0f);
@@ -1231,6 +1313,7 @@ void main(){
             mat.get(enemy).use();
             mesh.draw();
             prop.draw(mvp, model, col, eye, d, enemy, i, dt);
+            lights.draw(mvp, d);
         }
     }
 };
