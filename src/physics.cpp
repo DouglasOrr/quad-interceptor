@@ -165,7 +165,8 @@ void Physics::tick(GameState& state) {
         auto lift = std::max(0.0f, d.control_m[2]);
         auto cFL = lift, cFR = lift, cBL = lift, cBR = lift;
 
-        auto cw = d.control_m[3];  // (FL + BR) - (FR + BL)
+        auto cw =
+            std::clamp(d.pid_yaw(max_rate * d.control_m[3] - (-ang_vel_m[2]), dt), -1.0f, 1.0f);
         cFL += cw;
         cFR += -cw;
         cBL += -cw;

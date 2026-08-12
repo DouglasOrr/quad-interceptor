@@ -50,6 +50,7 @@ struct Drone {
     Vec<4> motor_speed;  // (FL, FR, BL, BR) in [0, 1]
     Pid pid_roll;
     Pid pid_pitch;
+    Pid pid_yaw;
 
     static Drone create(Vec<3> position);
 };
