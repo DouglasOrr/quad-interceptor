@@ -1,26 +1,42 @@
+#include <utility>
+#include <vector>
+
 #include "game.hpp"
 #include "platform.hpp"
+
+////////////////////////////////////////////////////////////////////////////////
+// Assets
+
+// Serialized font blob, defined in the generated font_data.cpp.
+std::span<const uint8_t> font_bytes();
+
+Font Font::load() {
+    Font font;
+    auto data = font_bytes();
+    const uint8_t n = data[0];
+    font.width = data[1];
+    font.height = data[2];
+    const size_t n_pixels = font.width * font.height;
+    gassert(n_pixels % 8 == 0);
+    const size_t cell_bytes = n_pixels / 8;
+    gassert(data.size() == 3 + n * (1 + cell_bytes));
+    font.glyphs.reserve(n);
+    for (uint8_t i = 0; i < n; ++i) {
+        const size_t off = 3 + size_t(i) * (1 + cell_bytes);
+        std::vector<uint8_t> px(n_pixels);
+        for (size_t p = 0; p < n_pixels; ++p)
+            px[p] = (data[off + 1 + p / 8] >> (7 - p % 8)) & 1 ? 255 : 0;
+        font.glyphs.push_back({data[off], std::move(px)});
+    }
+    return font;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// GameManager
 
 namespace {
 constexpr uint64 respawn_delay = 2.0f;
 constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
-
-void copy_control(const Window& w, Vec<4>& c) {
-    auto f = [](bool b) { return b ? 1.0f : 0.0f; };
-    c = {};
-    // WSAD
-    c[0] += f(w.held(Key::d)) - f(w.held(Key::a));
-    c[1] += f(w.held(Key::w)) - f(w.held(Key::s));
-    // Arrows
-    c[0] += f(w.held(Key::right)) - f(w.held(Key::left));
-    c[1] += f(w.held(Key::up)) - f(w.held(Key::down));
-    // ZXC
-    c[2] += f(w.held(Key::x));
-    c[3] += f(w.held(Key::c)) - f(w.held(Key::z));
-    // QEShift
-    c[2] += f(w.held(Key::shift));
-    c[3] += f(w.held(Key::e)) - f(w.held(Key::q));
-}
 }  // namespace
 
 void GameManager::update(GameState& state) {
@@ -40,6 +56,28 @@ void GameManager::update(GameState& state) {
         state.camera_orientation = d0.orientation;
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+// game_loop
+
+namespace {
+void copy_control(const Window& w, Vec<4>& c) {
+    auto f = [](bool b) { return b ? 1.0f : 0.0f; };
+    c = {};
+    // WSAD
+    c[0] += f(w.held(Key::d)) - f(w.held(Key::a));
+    c[1] += f(w.held(Key::w)) - f(w.held(Key::s));
+    // Arrows
+    c[0] += f(w.held(Key::right)) - f(w.held(Key::left));
+    c[1] += f(w.held(Key::up)) - f(w.held(Key::down));
+    // ZXC
+    c[2] += f(w.held(Key::x));
+    c[3] += f(w.held(Key::c)) - f(w.held(Key::z));
+    // QEShift
+    c[2] += f(w.held(Key::shift));
+    c[3] += f(w.held(Key::e)) - f(w.held(Key::q));
+}
+}  // namespace
 
 void game_loop(Window& window) {
     GameState state;

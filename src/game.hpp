@@ -12,14 +12,6 @@
 
 struct Window;  // defined in platform.hpp
 
-// Always-on assertion; overrides the standard `assert` so it stays active in
-// release builds (which define NDEBUG).
-[[noreturn]] inline void gg_assert_fail(const char* expr, const char* file, int line) {
-    std::fprintf(stderr, "assertion failed: %s (%s:%d)\n", expr, file, line);
-    std::abort();
-}
-#define gassert(cond) ((cond) ? (void)0 : gg_assert_fail(#cond, __FILE__, __LINE__))
-
 ////////////////////////////////////////////////////////////////////////////////
 // State
 //
@@ -87,25 +79,13 @@ struct GameState {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Game Manager
+// Game Manager & Assets
 
 struct GameManager {
     void update(GameState& state);
 };
 
 void game_loop(Window& window);
-
-///////////////////////////////////////////////////////////////////////////////
-// Physics
-
-struct Physics {
-    inline static constexpr float dt = 1e-3f;  // seconds
-
-    static void tick(GameState& state);
-};
-
-///////////////////////////////////////////////////////////////////////////////
-// Assets
 
 struct Font {
     struct Glyph {
@@ -117,6 +97,15 @@ struct Font {
     std::vector<Glyph> glyphs;
 
     static Font load();
+};
+
+///////////////////////////////////////////////////////////////////////////////
+// Physics
+
+struct Physics {
+    inline static constexpr float dt = 1e-3f;  // seconds
+
+    static void tick(GameState& state);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -150,6 +139,14 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 // Utility
+
+// Always-on assertion; overrides the standard `assert` so it stays active in
+// release builds (which define NDEBUG).
+[[noreturn]] inline void gg_assert_fail(const char* expr, const char* file, int line) {
+    std::fprintf(stderr, "assertion failed: %s (%s:%d)\n", expr, file, line);
+    std::abort();
+}
+#define gassert(cond) ((cond) ? (void)0 : gg_assert_fail(#cond, __FILE__, __LINE__))
 
 template <typename... Args>
 inline void print(const GameState& state, uint period, const Args&... args) {
