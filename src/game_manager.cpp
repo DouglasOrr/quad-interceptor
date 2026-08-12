@@ -41,7 +41,8 @@ constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly 
 
 void GameManager::update(GameState& state) {
     if (state.drones[0].status != Drone::Status::Alive) {
-        if (state.respawn_time == 0) state.respawn_time = state.tick + respawn_delay / Physics::dt;
+        if (state.respawn_time == 0)
+            state.respawn_time = state.tick + uint64(respawn_delay / Physics::dt);
         if (state.tick >= state.respawn_time) {
             state.respawn_time = 0;
             state.drones[0] = Drone::create(state.spawn);
