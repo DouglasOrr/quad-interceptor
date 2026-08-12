@@ -17,12 +17,6 @@ constexpr float motor_force = 8.0f;
 constexpr float motor_torque = 0.6f;
 constexpr Mat3 ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f);
 
-// Drone control - PID settings
-constexpr float max_rate = 2.5f;  // commanded pitch/roll rate, rad/s
-constexpr float pid_kp = 5.0f;
-constexpr float pid_ki = 3.0f;
-constexpr float pid_kd = 0.0f;
-
 constexpr float explosion_radius = 5.0f;
 constexpr float lock_on_rate = 1 / 15.0f;
 constexpr float lock_on_reset_rate = 1 / 30.0f;
@@ -47,12 +41,14 @@ uint64 hash_mix(uint64 x) {
 }
 }  // namespace
 
-float Pid::operator()(float error, float dt) {
+float Pid::operator()(float control, float actual, float dt) {
+    if (!enabled) return std::clamp(control, lo, hi);
+    float error = target * control - actual;
     integral += error * dt;
     integral = std::clamp(integral, -10.0f, 10.0f);  // anti-windup
     float delta = (error - prev) / dt;
     prev = error;
-    return pid_kp * error + pid_ki * integral + pid_kd * delta;
+    return std::clamp(kp * error + ki * integral + kd * delta, lo, hi);
 }
 
 Cell City::operator()(int64 x, int64 y) const {
@@ -107,6 +103,10 @@ Drone Drone::create(Vec<3> position) {
     d.lock_on = 0;
     d.control_m = {};
     d.motor_speed = {};
+    Pid rot = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    lift.enabled = false;
+    d.pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
     return d;
 }
 
@@ -161,30 +161,17 @@ void Physics::tick(GameState& state) {
             }
         }
 
-        // Motor controls
-        auto cFL = 0.0f, cFR = 0.0f, cBL = 0.0f, cBR = 0.0f;
+        // Controls - PID
+        auto lift = d.pid[2](d.control_m[2], d.velocity[2], dt);
+        auto cw = d.pid[3](d.control_m[3], -ang_vel_m[2], dt);
+        auto roll = d.pid[0](d.control_m[0], ang_vel_m[0], dt);
+        auto pitch = d.pid[1](d.control_m[1], ang_vel_m[1], dt);
 
-        auto lift = std::max(0.0f, d.control_m[2]);
-        cFL += lift;
-        cFR += lift;
-        cBL += lift;
-        cBR += lift;
-
-        auto cw =
-            std::clamp(d.pid_yaw(max_rate * d.control_m[3] - (-ang_vel_m[2]), dt), -1.0f, 1.0f);
-        cFL += cw;
-        cFR += -cw;
-        cBL += -cw;
-        cBR += cw;
-
-        auto roll =
-            std::clamp(d.pid_roll(max_rate * d.control_m[0] - ang_vel_m[0], dt), -1.0f, 1.0f);
-        auto pitch =
-            std::clamp(d.pid_pitch(max_rate * d.control_m[1] - ang_vel_m[1], dt), -1.0f, 1.0f);
-        cFL += -pitch + roll;
-        cFR += -pitch + -roll;
-        cBL += pitch + roll;
-        cBR += pitch + -roll;
+        // Motor mixer
+        auto cFL = lift + cw - pitch + roll;
+        auto cFR = lift - cw - pitch - roll;
+        auto cBL = lift - cw + pitch + roll;
+        auto cBR = lift + cw + pitch - roll;
 
         auto _speed = [](float c) { return std::min(1.0f, std::abs(c) / 3.0f); };
         d.motor_speed = {_speed(cFL), _speed(cFR), _speed(cBL), _speed(cBR)};
@@ -208,9 +195,5 @@ void Physics::tick(GameState& state) {
         auto ang_vel = mul(R, ang_vel_m);
         d.ang_momentum += dt * (torque - mul(R, mul(ang_damping_m, ang_vel_m)));
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));
-
-        // if (d_index == 0) {
-        //     print(state, 1000, "pos:", d.position[0], d.position[1], d.position[2]);
-        // }
     }
 }

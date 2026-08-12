@@ -18,9 +18,15 @@ struct Window;  // defined in platform.hpp
 // Default world frame; an '_m' suffix marks a model(body)-frame quantity.
 
 struct Pid {
+    // config
+    float target;
+    float lo, hi;
+    float kp, ki, kd;
+    bool enabled = true;
+    // state
     float integral = 0.0f;
     float prev = 0.0f;
-    float operator()(float error, float dt);
+    float operator()(float control, float actual, float dt);
 };
 
 struct Drone {
@@ -46,11 +52,9 @@ struct Drone {
     float lock_on;
 
     // Control
-    Vec<4> control_m;    // (roll R/L, pitch F/B, vertical U/D, yaw CW/CCW) in [-1, 1]
-    Vec<4> motor_speed;  // (FL, FR, BL, BR) in [0, 1]
-    Pid pid_roll;
-    Pid pid_pitch;
-    Pid pid_yaw;
+    Vec<4> control_m;        // (roll R/L, pitch F/B, lift U/D, yaw CW/CCW) in [-1, 1]
+    std::array<Pid, 4> pid;  // (roll, pitch, lift, yaw)
+    Vec<4> motor_speed;      // (FL, FR, BL, BR) in [0, 1]
 
     static Drone create(Vec<3> position);
 };
