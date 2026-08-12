@@ -64,18 +64,12 @@ namespace {
 void copy_control(const Window& w, Vec<4>& c) {
     auto f = [](bool b) { return b ? 1.0f : 0.0f; };
     c = {};
-    // WSAD
-    c[0] += f(w.held(Key::d)) - f(w.held(Key::a));
-    c[1] += f(w.held(Key::w)) - f(w.held(Key::s));
     // Arrows
     c[0] += f(w.held(Key::right)) - f(w.held(Key::left));
     c[1] += f(w.held(Key::up)) - f(w.held(Key::down));
     // ZXC
-    c[2] += f(w.held(Key::x));
+    c[2] += 2 * f(w.held(Key::x)) - 1;
     c[3] += f(w.held(Key::c)) - f(w.held(Key::z));
-    // QEShift
-    c[2] += f(w.held(Key::shift));
-    c[3] += f(w.held(Key::e)) - f(w.held(Key::q));
 }
 }  // namespace
 

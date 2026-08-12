@@ -162,8 +162,13 @@ void Physics::tick(GameState& state) {
         }
 
         // Motor controls
+        auto cFL = 0.0f, cFR = 0.0f, cBL = 0.0f, cBR = 0.0f;
+
         auto lift = std::max(0.0f, d.control_m[2]);
-        auto cFL = lift, cFR = lift, cBL = lift, cBR = lift;
+        cFL += lift;
+        cFR += lift;
+        cBL += lift;
+        cBR += lift;
 
         auto cw =
             std::clamp(d.pid_yaw(max_rate * d.control_m[3] - (-ang_vel_m[2]), dt), -1.0f, 1.0f);
@@ -172,14 +177,14 @@ void Physics::tick(GameState& state) {
         cBL += -cw;
         cBR += cw;
 
-        // Pitch/roll rates from a PID tracking the commanded rate (control in rad/s).
-        auto rl = std::clamp(d.pid_roll(max_rate * d.control_m[0] - ang_vel_m[0], dt), -1.0f, 1.0f);
-        auto fb =
+        auto roll =
+            std::clamp(d.pid_roll(max_rate * d.control_m[0] - ang_vel_m[0], dt), -1.0f, 1.0f);
+        auto pitch =
             std::clamp(d.pid_pitch(max_rate * d.control_m[1] - ang_vel_m[1], dt), -1.0f, 1.0f);
-        cFL += -fb + rl;
-        cFR += -fb + -rl;
-        cBL += fb + rl;
-        cBR += fb + -rl;
+        cFL += -pitch + roll;
+        cFR += -pitch + -roll;
+        cBL += pitch + roll;
+        cBR += pitch + -roll;
 
         auto _speed = [](float c) { return std::min(1.0f, std::abs(c) / 3.0f); };
         d.motor_speed = {_speed(cFL), _speed(cFR), _speed(cBL), _speed(cBR)};
