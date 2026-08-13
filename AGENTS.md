@@ -20,7 +20,7 @@ examples/<DD>-<name> -- standalone examples/demos
 
 ## Instructions
 
-- Leave git edit commands to the user, except where explicitly prompted.
+- Leave git edit commands to the user, do not stage/unstage, commit or push, except where explicitly prompted.
 - If asked to use a worktree, put it in `./agents/<name>`
 - In general, don't generate separate headers for new components - prefer game.hpp.
 - Keep constants, state and helper function declarations hidden in cpp files where possible.
@@ -29,6 +29,7 @@ examples/<DD>-<name> -- standalone examples/demos
 ## Style
 
 - C++20, -Wall -Wextra -Werror, clang-format.
-- Prefer concise code. Inline implementations where possible. Outline for reuse or clarity, where it reduces complexity.
 - Simple and direct over abstract and general.
+- Prefer concise code. Inline implementations where possible. Outline for reuse or clarity, where it reduces complexity.
+- Avoid default arguments/initialisers - prefer being explicit at call site.
 - Use comments sparingly, only when intent is otherwise unclear, and keep them brief.
