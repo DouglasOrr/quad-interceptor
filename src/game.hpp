@@ -65,12 +65,15 @@ struct Cell {
 };
 
 struct City {
+    using Pos = std::array<int64, 2>;
     inline static constexpr uint cell_size = 15;
     inline static constexpr uint block_size = 10;  // cells per city block (street grid period)
     inline static constexpr uint street_size = 2;  // street width, in cells (each block edge)
 
     int64 seed;
-    Cell operator()(int64 x, int64 y) const;  // (x, y) are cell coordinates
+    Cell operator()(Pos p) const;
+    static Pos nearest_cell(Vec<2> v);
+    static Vec<2> cell_center(Pos p);
 };
 
 struct GameState {
@@ -84,7 +87,7 @@ struct GameState {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Game Manager & Assets
+// Game Manager & Assets (game_manager.cpp)
 
 struct GameManager {
     void update(GameState& state);
@@ -105,7 +108,7 @@ struct Font {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Physics
+// Physics & AI (physics.cpp)
 
 struct Physics {
     inline static constexpr float dt = 1e-3f;  // seconds
@@ -113,8 +116,19 @@ struct Physics {
     static void tick(GameState& state);
 };
 
+struct AI {
+    AI();
+    ~AI();
+
+    void update(GameState& state);
+
+private:
+    struct State;
+    std::unique_ptr<State> state;
+};
+
 ///////////////////////////////////////////////////////////////////////////////
-// Renderer
+// Renderer (renderer.cpp)
 
 struct Renderer {
     Renderer();
@@ -128,7 +142,7 @@ private:
 };
 
 ///////////////////////////////////////////////////////////////////////////////
-// Audio
+// Audio (audio.cpp)
 
 struct AudioEngine {
     AudioEngine();

@@ -77,14 +77,15 @@ void copy_control(const Window& w, Vec<4>& c) {
 void game_loop(Window& window) {
     GameState state;
     auto C = float(City::cell_size);
-    state.spawn = {C, C, 1.0f};
+    state.spawn = {C, C, 5.0f};
     state.drones = {
         Drone::create(state.spawn),
-        Drone::create({5 * C, C, 1.0f}),
-        Drone::create({C, 10 * C, 1.0f}),
+        Drone::create({11 * C, C, 5.0f}),
+        Drone::create({C, 11 * C, 5.0f}),
     };
     auto initial_state = state;
     GameManager game_manager;
+    AI ai;
     Renderer renderer;
     AudioEngine audio_engine;
     window.set_audio_callback([&audio_engine](int16_t* stream, int num_frames) {
@@ -99,6 +100,7 @@ void game_loop(Window& window) {
             physics_time = 0.0f;
         }
         copy_control(window, state.drones[0].control_m);
+        ai.update(state);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
             Physics::tick(state);

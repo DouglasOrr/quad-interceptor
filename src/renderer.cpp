@@ -977,7 +977,7 @@ void main(){
             std::vector<float> buildings_world, buildings_color;
             for (int64 dy = -city_radius; dy <= city_radius; ++dy) {
                 for (int64 dx = -city_radius; dx <= city_radius; ++dx) {
-                    Cell c = city(ax + dx, ay + dy);
+                    Cell c = city({ax + dx, ay + dy});
                     float wx = float(ax + dx) * cell;
                     float wy = float(ay + dy) * cell;
                     if (c.height > 0.0f) {
