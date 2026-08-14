@@ -82,14 +82,20 @@ uniform vec3 u_ambient;
 uniform vec3 u_diffuse;
 uniform vec3 u_specular;
 uniform float u_shininess;
+uniform vec3 u_fog_color;
+uniform vec2 u_fog_range; // x = fog_start, y = fog_end
 void main(){
   vec3 N = normalize(cross(dFdx(v_world), dFdy(v_world)));
   vec3 L = normalize(u_light_dir);
-  vec3 V = normalize(u_cam_pos - v_world);
+  vec3 to_cam = u_cam_pos - v_world;
+  float dist = length(to_cam);
+  vec3 V = to_cam / max(dist, 0.0001);
   vec3 H = normalize(L + V);
   float diff = max(dot(N, L), 0.0);
   float spec = diff > 0.0 ? pow(max(dot(N, H), 0.0), u_shininess) : 0.0;
-  frag = vec4(v_color * (u_ambient + u_diffuse * diff) + u_specular * spec, 1.0);
+  vec3 lit = v_color * (u_ambient + u_diffuse * diff) + u_specular * spec;
+  float fog = clamp((dist - u_fog_range.x) / (u_fog_range.y - u_fog_range.x), 0.0, 1.0);
+  frag = vec4(mix(lit, u_fog_color, fog), 1.0);
 }
 )";
 
@@ -467,8 +473,11 @@ struct PhongMaterial {
 constexpr float fov_deg = 100.0f;
 constexpr int city_radius = 60;  // cells rendered around the player in each direction
 constexpr Vec<3> light_dir{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
-constexpr int minimap_cells = 20;                 // radar radius, in street cells
-constexpr int minimap_size = 300;                 // square side, in pixels
+constexpr Vec<3> fog_color{0.15f, 0.15f, 0.2f};
+constexpr float fog_end = float(city_radius) * float(City::cell_size);
+constexpr float fog_start = fog_end * 0.5f;
+constexpr int minimap_cells = 20;  // radar radius, in street cells
+constexpr int minimap_size = 300;  // square side, in pixels
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
 // local -z (forward) with +y up; we want forward = drone +x, up = drone +z,
@@ -910,6 +919,8 @@ struct CityView {
     Uniform u_cell_size;
     Uniform u_light_dir;
     Uniform u_cam_pos;
+    Uniform u_fog_color;
+    Uniform u_fog_range;
     Mesh floor;
     Mesh buildings;
     PhongMaterial floor_mat{.ambient = grey(0.1),
@@ -947,6 +958,8 @@ void main(){
         u_cell_size = program.uniform("u_cell_size");
         u_light_dir = program.uniform("u_light_dir");
         u_cam_pos = program.uniform("u_cam_pos");
+        u_fog_color = program.uniform("u_fog_color");
+        u_fog_range = program.uniform("u_fog_range");
         floor_mat.init(program);
         building_mat.init(program);
 
@@ -1006,6 +1019,8 @@ void main(){
             floor_mat.use();
             u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
+            u_fog_color.set(fog_color);
+            u_fog_range.set(Vec<2>{fog_start, fog_end});
             floor.draw();
         }
         if (buildings.instance_count > 0) {
@@ -1015,6 +1030,8 @@ void main(){
             building_mat.use();
             u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
+            u_fog_color.set(fog_color);
+            u_fog_range.set(Vec<2>{fog_start, fog_end});
             buildings.draw();
         }
     }
@@ -1066,6 +1083,8 @@ struct DronePropView {
     Uniform u_color;
     Uniform u_light_dir;
     Uniform u_cam_pos;
+    Uniform u_fog_color;
+    Uniform u_fog_range;
     Mesh mesh;
     DroneMaterials mat;
     struct DroneProp {
@@ -1104,6 +1123,8 @@ void main(){
         u_color = program.uniform("u_color");
         u_light_dir = program.uniform("u_light_dir");
         u_cam_pos = program.uniform("u_cam_pos");
+        u_fog_color = program.uniform("u_fog_color");
+        u_fog_range = program.uniform("u_fog_range");
         mat.init(program);
 
         auto prop_verts = make_propeller();
@@ -1150,6 +1171,8 @@ void main(){
         u_color.set(col);
         u_light_dir.set(light_dir);
         u_cam_pos.set(eye);
+        u_fog_color.set(fog_color);
+        u_fog_range.set(Vec<2>{fog_start, fog_end});
         mat.get(enemy).use();
         mesh.draw();
     }
@@ -1244,6 +1267,8 @@ struct DroneView {
     Uniform u_color;
     Uniform u_light_dir;
     Uniform u_cam_pos;
+    Uniform u_fog_color;
+    Uniform u_fog_range;
     Mesh mesh;
     DronePropView prop;
     DroneLightsView lights;
@@ -1272,6 +1297,8 @@ void main(){
         u_color = program.uniform("u_color");
         u_light_dir = program.uniform("u_light_dir");
         u_cam_pos = program.uniform("u_cam_pos");
+        u_fog_color = program.uniform("u_fog_color");
+        u_fog_range = program.uniform("u_fog_range");
         mat.init(program);
 
         std::vector<float> verts;
@@ -1313,6 +1340,8 @@ void main(){
                 program.use();
                 u_light_dir.set(light_dir);
                 u_cam_pos.set(eye);
+                u_fog_color.set(fog_color);
+                u_fog_range.set(Vec<2>{fog_start, fog_end});
                 u_mvp.set(mvp);
                 u_model.set(model);
                 u_color.set(col);
@@ -1357,7 +1386,7 @@ Renderer::~Renderer() = default;
 void Renderer::draw(const GameState& s, float dt) {
     ++state->static_time;
 
-    glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
+    glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
     const auto& player = player_drone(s);
