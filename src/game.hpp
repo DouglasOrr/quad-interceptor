@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "maths.hpp"
@@ -158,6 +159,28 @@ private:
 
 ///////////////////////////////////////////////////////////////////////////////
 // Utility
+
+// Iterate drones, defaulting to alive drones
+template <typename F>
+void foreach_drone(GameState& state,
+                   F&& f,
+                   std::optional<Drone::Status> status = Drone::Status::Alive) {
+    for (size_t i = 0; i < state.drones.size(); ++i) {
+        if (!status || (state.drones[i].status == *status)) {
+            f(i, state.drones[i]);
+        }
+    }
+}
+template <typename F>
+void foreach_drone(const GameState& state,
+                   F&& f,
+                   std::optional<Drone::Status> status = Drone::Status::Alive) {
+    for (size_t i = 0; i < state.drones.size(); ++i) {
+        if (!status || (state.drones[i].status == *status)) {
+            f(i, state.drones[i]);
+        }
+    }
+}
 
 // Always-on assertion; overrides the standard `assert` so it stays active in
 // release builds (which define NDEBUG).

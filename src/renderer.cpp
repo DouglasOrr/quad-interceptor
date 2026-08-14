@@ -654,12 +654,10 @@ void main(){
         u_inner.set(0.0f);
 
         // Drone markers
-        for (size_t i = 0; i < s.drones.size(); ++i) {
-            const Drone& d = s.drones[i];
-            if (d.status != Drone::Status::Alive) continue;
+        foreach_drone(s, [&](size_t i, const Drone& d) {
             Vec<3> color = (i == 0) ? Vec<3>{0.2f, 0.75f, 0.95f} : Vec<3>{0.95f, 0.20f, 0.20f};
             draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
-        }
+        });
 
         // Lock-on annulus
         if (s.drones[0].lock_on > 0.0f) {
@@ -1296,9 +1294,7 @@ void main(){
 
     void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye, float dt) {
         prop.angles.resize(s.drones.size());
-        for (size_t i = 0; i < s.drones.size(); ++i) {
-            const Drone& d = s.drones[i];
-            if (d.status != Drone::Status::Alive) continue;
+        foreach_drone(s, [&](size_t i, const Drone& d) {
             const bool enemy = (i != 0);
             const Vec<3>& col = enemy ? ENEMY_COLOR : PLAYER_COLOR;
             Mat4 model = mul(mat_rigid(mat_from(d.orientation), d.position),
@@ -1314,7 +1310,7 @@ void main(){
             mesh.draw();
             prop.draw(mvp, model, col, eye, d, enemy, i, dt);
             lights.draw(mvp, d);
-        }
+        });
     }
 };
 

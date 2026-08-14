@@ -130,17 +130,15 @@ Drone Drone::create(Vec<3> position) {
 
 void Physics::tick(GameState& state) {
     ++state.tick;
-    for (uint d_index = 0; d_index < state.drones.size(); ++d_index) {
-        auto& d = state.drones[d_index];
+    foreach_drone(state, [&](size_t d_index, Drone& d) {
         auto R = mat_from(d.orientation);
         auto Rt = transpose(R);
         auto ang_vel_m = mul(body_inv_inertia_m, mul(Rt, d.ang_momentum));  // actual rates (model)
 
         // Collisions (building)
-        if (d.status != Drone::Status::Alive) continue;  // already dead
         if (hits_building(state.city, d.position, Drone::collision_radius)) {
             d.status = Drone::Status::Crashed;
-            continue;
+            return;
         }
 
         // Alitutude-based lock-on death (player only)
@@ -149,7 +147,7 @@ void Physics::tick(GameState& state) {
                 d.lock_on += lock_on_rate * dt;
                 if (d.lock_on >= 1.0f) {
                     d.status = Drone::Status::Crashed;
-                    continue;
+                    return;
                 }
             } else {
                 d.lock_on = std::max(0.0f, d.lock_on - lock_on_reset_rate * dt);
@@ -213,7 +211,7 @@ void Physics::tick(GameState& state) {
         auto ang_vel = mul(R, ang_vel_m);
         d.ang_momentum += dt * (torque - mul(R, mul(ang_damping_m, ang_vel_m)));
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));
-    }
+    });
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -283,17 +281,19 @@ AI::~AI() = default;
 void AI::update(GameState& s) {
     if (state->drones.size() != s.drones.size()) state->drones.resize(s.drones.size());
 
-    for (size_t i = 0; i < s.drones.size(); ++i)
-        if (s.drones[i].status != Drone::Status::Alive) {
-            state->drones[i].current = {};
-            state->drones[i].prev = {};
-        }
+    foreach_drone(
+        s,
+        [&](size_t i, Drone& d) {
+            if (d.status != Drone::Status::Alive) {
+                state->drones[i].current = {};
+                state->drones[i].prev = {};
+            }
+        },
+        /*status*/ std::nullopt);
 
-    for (size_t i = 0; i < s.drones.size(); ++i) {
-        auto& d = s.drones[i];
+    foreach_drone(s, [&](size_t i, Drone& d) {
+        if (i == 0) return;  // player drone
         auto& a = state->drones[i];
-        if (d.status != Drone::Status::Alive) continue;
-        if (i == 0) continue;  // player drone
 
         Vec<3> wp = choose_next_waypoint(s, i, a, d.position);
 
@@ -320,5 +320,5 @@ void AI::update(GameState& s) {
         Vec<3> right = rotate(d.orientation, {0.0f, 1.0f, 0.0f});
         float roll_angle = std::asin(std::clamp(right[2], -1.0f, 1.0f));
         d.control_m[0] = a.roll(target_roll, roll_angle, Physics::dt);
-    }
+    });
 }
