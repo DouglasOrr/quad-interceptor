@@ -24,6 +24,8 @@ constexpr float dead_noise_gain = 4000.0f;
 
 struct AudioEngine::State {
     struct DroneAudio {
+        uint id;
+        Drone::Kind kind;
         // game state
         Vec<3> position;
         Quat orientation;
@@ -53,24 +55,36 @@ void AudioEngine::update(const GameState& game_state) {
     std::lock_guard<std::mutex> lock(state->mutex);
     state->cam_pos = game_state.camera_pos;
     state->cam_right = rotate(game_state.camera_orientation, {0.0f, -1.0f, 0.0f});
-    size_t prev = state->drones.size();
-    state->drones.resize(game_state.drones.size());
-    for (size_t i = prev; i < state->drones.size(); ++i) {  // new drones: random phase
-        for (float& p : state->drones[i].motor_phase)
-            p = 0.5f * (state->next_noise() + 1.0f);
-    }
-    for (size_t i = 0; i < game_state.drones.size(); ++i) {
-        const auto& d = game_state.drones[i];
-        auto& da = state->drones[i];
-        da.position = d.position;
-        da.orientation = d.orientation;
-        da.motor_speed = d.motor_speed;
-        da.status = d.status;
-    }
+
+    sync_parallel(
+        game_state.drones, state->drones,
+        [&](const Drone& d) {
+            State::DroneAudio da;
+            da.id = d.id;
+            da.kind = d.kind;
+            for (float& p : da.motor_phase) {
+                p = 0.5f * (state->next_noise() + 1.0f);
+            }
+            return da;
+        },
+        [&](const Drone& d, auto& da) {
+            da.position = d.position;
+            da.orientation = d.orientation;
+            da.motor_speed = d.motor_speed;
+            da.status = d.status;
+        });
 }
 
 void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
     std::lock_guard<std::mutex> lock(state->mutex);
+
+    bool player_dead = false;
+    for (const auto& d : state->drones) {
+        if (d.kind == Drone::Kind::Player && d.status != Drone::Status::Alive) {
+            player_dead = true;
+            break;
+        }
+    }
 
     for (int i = 0; i < num_samples; ++i) {
         std::array<float, 2> mix = {0.0f, 0.0f};
@@ -111,7 +125,7 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
             }
         }
 
-        if (state->drones.size() && state->drones[0].status != Drone::Status::Alive) {
+        if (player_dead) {
             float n = state->next_noise();
             mix[0] += n * dead_noise_gain;
             mix[1] += n * dead_noise_gain;

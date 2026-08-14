@@ -108,8 +108,13 @@ bool hits_building(const City& city, Vec<3> p, float r) {
 }
 }  // namespace
 
-Drone Drone::create(Vec<3> position) {
+Drone& spawn_drone(GameState& state, Drone::Kind kind, Vec<3> position) {
+    if (kind == Drone::Kind::Player) {
+        std::erase_if(state.drones, [](const Drone& d) { return d.kind == Drone::Kind::Player; });
+    }
     Drone d;
+    d.id = state.next_drone_id++;
+    d.kind = kind;
     d.position = position;
     d.velocity = {};
     d.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -122,7 +127,8 @@ Drone Drone::create(Vec<3> position) {
     Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
     lift.enabled = false;
     d.pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
-    return d;
+    state.drones.push_back(d);
+    return state.drones.back();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -130,7 +136,8 @@ Drone Drone::create(Vec<3> position) {
 
 void Physics::tick(GameState& state) {
     ++state.tick;
-    foreach_drone(state, [&](size_t d_index, Drone& d) {
+    auto& player = player_drone(state);
+    foreach_drone(state, [&](size_t, Drone& d) {
         auto R = mat_from(d.orientation);
         auto Rt = transpose(R);
         auto ang_vel_m = mul(body_inv_inertia_m, mul(Rt, d.ang_momentum));  // actual rates (model)
@@ -142,7 +149,7 @@ void Physics::tick(GameState& state) {
         }
 
         // Alitutude-based lock-on death (player only)
-        if (d_index == 0) {
+        if (d.kind == Drone::Kind::Player) {
             if (d.position[2] > Drone::lock_on_level) {
                 d.lock_on += lock_on_rate * dt;
                 if (d.lock_on >= 1.0f) {
@@ -154,11 +161,11 @@ void Physics::tick(GameState& state) {
             }
         }
 
-        // Collisions (drones)
-        if (d_index != 0 && state.drones[0].status == Drone::Status::Alive) {
-            if (length(d.position - state.drones[0].position) < explosion_radius) {
+        // Collisions (drones: enemy against player)
+        if (d.kind == Drone::Kind::Enemy && player.status == Drone::Status::Alive) {
+            if (length(d.position - player.position) < explosion_radius) {
                 d.status = Drone::Status::Detonated;
-                state.drones[0].status = Drone::Status::Detonated;
+                player.status = Drone::Status::Detonated;
             }
         }
 
@@ -224,6 +231,7 @@ constexpr float ai_pitch_angle = 30.0f * deg_to_rad;
 constexpr float ai_max_roll_angle = 60.0f * deg_to_rad;
 
 struct DroneAI {
+    uint id;
     Pid lift = {.target = 1.0f, .lo = 0.0f, .hi = 1.0f, .kp = 16.0f, .ki = 1.0f, .kd = 1.0f};
     Pid yaw = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 1.0f, .kd = 0.5f};
     Pid pitch = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 0.25f};
@@ -234,15 +242,15 @@ struct DroneAI {
                    .kp = 0.1f,
                    .ki = 0.0f,
                    .kd = 0.0f};
-    std::optional<City::Pos> current;
-    std::optional<City::Pos> prev;
+    std::optional<City::Pos> current = {};
+    std::optional<City::Pos> prev = {};
 };
 
 // Street corners live at cell coordinates ≡ 1 (mod City::block_size), i.e. the
 // centre of a street_size-wide street. Advances to a new corner (excluding the
 // previous, to avoid doubling back) when within 2*cell_size, and returns the
 // world target to fly to.
-Vec<3> choose_next_waypoint(const GameState& s, size_t i, DroneAI& a, const Vec<3>& pos) {
+Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
     // Initialise current/prev to the closest street corner if unset.
     if (!a.current) {
         auto c = City::nearest_cell({pos[0], pos[1]});
@@ -262,7 +270,7 @@ Vec<3> choose_next_waypoint(const GameState& s, size_t i, DroneAI& a, const Vec<
         std::vector<City::Pos> choices;
         for (auto& n : nbrs)
             if (!a.prev || n != *a.prev) choices.push_back(n);
-        City::Pos next = choices[hash(s.city.seed, s.tick, i) % choices.size()];
+        City::Pos next = choices[hash(s.city.seed, s.tick, a.id) % choices.size()];
         a.prev = old_current;
         a.current = next;
     }
@@ -279,46 +287,35 @@ AI::AI() : state(std::make_unique<State>()) {}
 AI::~AI() = default;
 
 void AI::update(GameState& s) {
-    if (state->drones.size() != s.drones.size()) state->drones.resize(s.drones.size());
+    sync_parallel(
+        s.drones, state->drones, [](const Drone& d) { return DroneAI{.id = d.id}; },
+        [&](Drone& d, DroneAI& a) {
+            if (d.kind != Drone::Kind::Enemy || d.status != Drone::Status::Alive) return;
 
-    foreach_drone(
-        s,
-        [&](size_t i, Drone& d) {
-            if (d.status != Drone::Status::Alive) {
-                state->drones[i].current = {};
-                state->drones[i].prev = {};
-            }
-        },
-        /*status*/ std::nullopt);
+            Vec<3> wp = choose_next_waypoint(s, a, d.position);
 
-    foreach_drone(s, [&](size_t i, Drone& d) {
-        if (i == 0) return;  // player drone
-        auto& a = state->drones[i];
+            // Lift - hover at the waypoint altitude
+            d.control_m[2] = a.lift(wp[2], d.position[2], Physics::dt);
 
-        Vec<3> wp = choose_next_waypoint(s, i, a, d.position);
+            // Yaw - face the waypoint
+            Vec<2> desired = normalise(Vec<2>{wp[0] - d.position[0], wp[1] - d.position[1]});
+            Vec<3> fwd = rotate(d.orientation, {1.0f, 0.0f, 0.0f});
+            Vec<2> fwd_xy = normalise(Vec<2>{fwd[0], fwd[1]});
+            float yaw_err = std::atan2(fwd_xy[0] * desired[1] - fwd_xy[1] * desired[0],
+                                       fwd_xy[0] * desired[0] + fwd_xy[1] * desired[1]);
+            d.control_m[3] = a.yaw(0.0f, yaw_err, Physics::dt);
 
-        // Lift - hover at the waypoint altitude
-        d.control_m[2] = a.lift(wp[2], d.position[2], Physics::dt);
+            // Pitch - aim for a target nose-down angle (when facing the waypoint)
+            float target_pitch =
+                std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle;
+            float pitch_angle = -std::asin(std::clamp(fwd[2], -1.0f, 1.0f));
+            d.control_m[1] = a.pitch(target_pitch, pitch_angle, Physics::dt);
 
-        // Yaw - face the waypoint
-        Vec<2> desired = normalise(Vec<2>{wp[0] - d.position[0], wp[1] - d.position[1]});
-        Vec<3> fwd = rotate(d.orientation, {1.0f, 0.0f, 0.0f});
-        Vec<2> fwd_xy = normalise(Vec<2>{fwd[0], fwd[1]});
-        float yaw_err = std::atan2(fwd_xy[0] * desired[1] - fwd_xy[1] * desired[0],
-                                   fwd_xy[0] * desired[0] + fwd_xy[1] * desired[1]);
-        d.control_m[3] = a.yaw(0.0f, yaw_err, Physics::dt);
-
-        // Pitch - aim for a target nose-down angle (when facing the waypoint)
-        float target_pitch =
-            std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle;
-        float pitch_angle = -std::asin(std::clamp(fwd[2], -1.0f, 1.0f));
-        d.control_m[1] = a.pitch(target_pitch, pitch_angle, Physics::dt);
-
-        // Lateral Vel > Roll - aim for zero lateral motion.
-        float lat_vel = -d.velocity[0] * fwd_xy[1] + d.velocity[1] * fwd_xy[0];
-        float target_roll = -a.lateral(0.0f, lat_vel, Physics::dt);
-        Vec<3> right = rotate(d.orientation, {0.0f, 1.0f, 0.0f});
-        float roll_angle = std::asin(std::clamp(right[2], -1.0f, 1.0f));
-        d.control_m[0] = a.roll(target_roll, roll_angle, Physics::dt);
-    });
+            // Lateral Vel > Roll - aim for zero lateral motion.
+            float lat_vel = -d.velocity[0] * fwd_xy[1] + d.velocity[1] * fwd_xy[0];
+            float target_roll = -a.lateral(0.0f, lat_vel, Physics::dt);
+            Vec<3> right = rotate(d.orientation, {0.0f, 1.0f, 0.0f});
+            float roll_angle = std::asin(std::clamp(right[2], -1.0f, 1.0f));
+            d.control_m[0] = a.roll(target_roll, roll_angle, Physics::dt);
+        });
 }

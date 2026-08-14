@@ -595,7 +595,8 @@ void main(){
         const float R = float(City::cell_size) * minimap_cells;
         const float px_to_world = 2.0f * R / float(minimap_size);  // 1px radius -> world scale
 
-        const Vec<3>& p = s.drones[0].position;
+        const auto& player = player_drone(s);
+        const Vec<3>& p = player.position;
 
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
@@ -604,7 +605,7 @@ void main(){
         glDisable(GL_BLEND);
 
         // Heading-up radar: rotate so the player's forward points up.
-        const Vec<3> fwd = rotate(s.drones[0].orientation, Vec<3>{1.0f, 0.0f, 0.0f});
+        const Vec<3> fwd = rotate(player.orientation, Vec<3>{1.0f, 0.0f, 0.0f});
         const float phi = M_PIf / 2.0f - std::atan2(fwd[1], fwd[0]);
         const Quat heading{0.0f, 0.0f, std::sin(phi / 2.0f), std::cos(phi / 2.0f)};
         const Mat4 mvp = mul(mat_ortho(-R, R, -R, R), mat_from(heading, {0.0f, 0.0f, 0.0f}));
@@ -654,19 +655,20 @@ void main(){
         u_inner.set(0.0f);
 
         // Drone markers
-        foreach_drone(s, [&](size_t i, const Drone& d) {
-            Vec<3> color = (i == 0) ? Vec<3>{0.2f, 0.75f, 0.95f} : Vec<3>{0.95f, 0.20f, 0.20f};
+        foreach_drone(s, [&](size_t, const Drone& d) {
+            Vec<3> color = (d.kind == Drone::Kind::Player) ? Vec<3>{0.2f, 0.75f, 0.95f}
+                                                           : Vec<3>{0.95f, 0.20f, 0.20f};
             draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
         });
 
         // Lock-on annulus
-        if (s.drones[0].lock_on > 0.0f) {
+        if (player.lock_on > 0.0f) {
             glEnable(GL_BLEND);
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             u_translate.set(Vec<2>{0.0f, 0.0f});
             u_scale.set(R);
             u_radius.set(R);
-            u_inner.set(std::max(0.0f, 1.0f - s.drones[0].lock_on) * R);
+            u_inner.set(std::max(0.0f, 1.0f - player.lock_on) * R);
             u_alpha.set(0.2f);
             u_color.set(Vec<3>{0.9f, 0.1f, 0.1f});
             disc.draw();
@@ -757,7 +759,7 @@ void main(){
     }
 
     void draw(const GameState& s, TextBatch& text) {
-        const Drone& d = s.drones[0];
+        const Drone& d = player_drone(s);
         const uint attitude_size = 140;
 
         // Draw the attitude indicator as a circle in the lower-left
@@ -861,8 +863,9 @@ void main() {
         glEnable(GL_DEPTH_TEST);
 
         constexpr float font_scale = 5.0f;
+        const auto& player = player_drone(s);
         const char* label =
-            (s.drones[0].status == Drone::Status::Detonated) ? "detonation" : "signal lost";
+            (player.status == Drone::Status::Detonated) ? "detonation" : "signal lost";
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
         const float text_w = float(std::strlen(label)) * text.font.width * font_scale;
@@ -965,9 +968,9 @@ void main(){
     void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye) {
         const City& city = s.city;
         const float cell = city.cell_size;
-        const Drone& d0 = s.drones[0];
-        const int64 ax = static_cast<int64>(std::floor(d0.position[0] / cell));
-        const int64 ay = static_cast<int64>(std::floor(d0.position[1] / cell));
+        const Drone& player = player_drone(s);
+        const int64 ax = static_cast<int64>(std::floor(player.position[0] / cell));
+        const int64 ay = static_cast<int64>(std::floor(player.position[1] / cell));
         if (ax != anchor_x || ay != anchor_y) {
             anchor_x = ax;
             anchor_y = ay;
@@ -1065,7 +1068,11 @@ struct DronePropView {
     Uniform u_cam_pos;
     Mesh mesh;
     DroneMaterials mat;
-    std::vector<std::array<float, 4>> angles;
+    struct DroneProp {
+        uint id;
+        std::array<float, 4> angles{};
+    };
+    std::vector<DroneProp> props;
 
     DronePropView() {
         const char* v_src = R"(
@@ -1117,7 +1124,7 @@ void main(){
               const Vec<3>& eye,
               const Drone& d,
               bool enemy,
-              size_t drone_idx,
+              DroneProp& prop,
               float dt) {
         std::vector<float> inst_pos;
         std::vector<float> inst_angle;
@@ -1126,8 +1133,8 @@ void main(){
             Vec<3> offset = Drone::motor_offsets_m[p];
             offset[2] = Drone::height * 0.55f;
             float dir = (p == 0 || p == 3) ? 1.0f : -1.0f;
-            angles[drone_idx][p] += dir * 80.0f * (0.3f + d.motor_speed[p]) * dt;
-            float angle = angles[drone_idx][p];
+            prop.angles[p] += dir * 80.0f * (0.3f + d.motor_speed[p]) * dt;
+            float angle = prop.angles[p];
 
             inst_pos.insert(inst_pos.end(), {offset[0], offset[1], offset[2]});
             inst_angle.push_back(angle);
@@ -1293,24 +1300,27 @@ void main(){
     }
 
     void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye, float dt) {
-        prop.angles.resize(s.drones.size());
-        foreach_drone(s, [&](size_t i, const Drone& d) {
-            const bool enemy = (i != 0);
-            const Vec<3>& col = enemy ? ENEMY_COLOR : PLAYER_COLOR;
-            Mat4 model = mul(mat_rigid(mat_from(d.orientation), d.position),
-                             enemy ? enemy_scale : player_scale);
-            Mat4 mvp = mul(view_projection_mat, model);
-            program.use();
-            u_light_dir.set(light_dir);
-            u_cam_pos.set(eye);
-            u_mvp.set(mvp);
-            u_model.set(model);
-            u_color.set(col);
-            mat.get(enemy).use();
-            mesh.draw();
-            prop.draw(mvp, model, col, eye, d, enemy, i, dt);
-            lights.draw(mvp, d);
-        });
+        sync_parallel(
+            s.drones, prop.props,
+            [](const Drone& d) { return DronePropView::DroneProp{.id = d.id}; },
+            [&](const Drone& d, DronePropView::DroneProp& p) {
+                if (d.status != Drone::Status::Alive) return;
+                const bool enemy = (d.kind == Drone::Kind::Enemy);
+                const Vec<3>& col = enemy ? ENEMY_COLOR : PLAYER_COLOR;
+                Mat4 model = mul(mat_rigid(mat_from(d.orientation), d.position),
+                                 enemy ? enemy_scale : player_scale);
+                Mat4 mvp = mul(view_projection_mat, model);
+                program.use();
+                u_light_dir.set(light_dir);
+                u_cam_pos.set(eye);
+                u_mvp.set(mvp);
+                u_model.set(model);
+                u_color.set(col);
+                mat.get(enemy).use();
+                mesh.draw();
+                prop.draw(mvp, model, col, eye, d, enemy, p, dt);
+                lights.draw(mvp, d);
+            });
     }
 };
 
@@ -1350,10 +1360,10 @@ void Renderer::draw(const GameState& s, float dt) {
     glClearColor(0.1f, 0.1f, 0.2f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
+    const auto& player = player_drone(s);
 
     // Camera view
-    Mat4 view_mat =
-        rigid_inverse(mul(mat_from(s.drones[0].orientation, s.camera_pos), cam_rotation));
+    Mat4 view_mat = rigid_inverse(mul(mat_from(player.orientation, s.camera_pos), cam_rotation));
     Mat4 view_projection_mat = mul(state->projection, view_mat);
 
     // Scene
@@ -1363,7 +1373,7 @@ void Renderer::draw(const GameState& s, float dt) {
     // Overlays
     state->minimap.draw(s);
     state->hud.draw(s, state->text);
-    if (s.drones[0].status != Drone::Status::Alive)
+    if (player.status != Drone::Status::Alive)
         state->overlay.draw(state->static_time, s, state->text);
     state->fps.draw(dt, state->text);
 }

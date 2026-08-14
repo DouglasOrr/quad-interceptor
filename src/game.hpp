@@ -32,6 +32,7 @@ struct Pid {
 
 struct Drone {
     enum class Status { Alive, Crashed, Detonated };
+    enum class Kind { Player, Enemy };
 
     inline static constexpr float height = 0.15f;
     inline static constexpr float collision_radius = 0.4f;
@@ -43,6 +44,10 @@ struct Drone {
         {{-_radius / M_SQRT2f, _radius / M_SQRT2f, 0.0f}},   // BL
         {{-_radius / M_SQRT2f, -_radius / M_SQRT2f, 0.0f}},  // BR
     }};
+
+    // Identity
+    uint id;
+    Kind kind;
 
     // State
     Vec<3> position;      // (world)
@@ -56,8 +61,6 @@ struct Drone {
     Vec<4> control_m;        // (roll R/L, pitch F/B, lift U/D, yaw CW/CCW) in [-1, 1]
     std::array<Pid, 4> pid;  // (roll, pitch, lift, yaw)
     Vec<4> motor_speed;      // (FL, FR, BL, BR) in [0, 1]
-
-    static Drone create(Vec<3> position);
 };
 
 struct Cell {
@@ -79,13 +82,16 @@ struct City {
 
 struct GameState {
     uint64 tick;
-    Vec<3> spawn;               // player respawn position
-    uint64 respawn_time;        // physics tick at which the player respawns (0 = none)
-    std::vector<Drone> drones;  // player = drones[0]
+    Vec<3> spawn;         // player respawn position
+    uint64 respawn_time;  // physics tick at which the player respawns (0 = none)
+    uint next_drone_id;
+    std::vector<Drone> drones;
     City city;
     Vec<3> camera_pos;
     Quat camera_orientation;
 };
+
+Drone& spawn_drone(GameState& state, Drone::Kind kind, Vec<3> position);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Game Manager & Assets (game_manager.cpp)
@@ -160,6 +166,23 @@ private:
 ///////////////////////////////////////////////////////////////////////////////
 // Utility
 
+// Always-on assertion; overrides the standard `assert` so it stays active in
+// release builds (which define NDEBUG).
+[[noreturn]] inline void gg_assert_fail(const char* expr, const char* file, int line) {
+    std::fprintf(stderr, "assertion failed: %s (%s:%d)\n", expr, file, line);
+    std::abort();
+}
+#define gassert(cond) ((cond) ? (void)0 : gg_assert_fail(#cond, __FILE__, __LINE__))
+
+template <typename... Args>
+inline void print(const GameState& state, uint period, const Args&... args) {
+    if (state.tick % period == 0) {
+        std::cerr << '[' << state.tick << "]";
+        ((std::cerr << ' ' << args), ...);
+        std::cerr << '\n';
+    }
+}
+
 // Iterate drones, defaulting to alive drones
 template <typename F>
 void foreach_drone(GameState& state,
@@ -182,19 +205,36 @@ void foreach_drone(const GameState& state,
     }
 }
 
-// Always-on assertion; overrides the standard `assert` so it stays active in
-// release builds (which define NDEBUG).
-[[noreturn]] inline void gg_assert_fail(const char* expr, const char* file, int line) {
-    std::fprintf(stderr, "assertion failed: %s (%s:%d)\n", expr, file, line);
-    std::abort();
-}
-#define gassert(cond) ((cond) ? (void)0 : gg_assert_fail(#cond, __FILE__, __LINE__))
-
-template <typename... Args>
-inline void print(const GameState& state, uint period, const Args&... args) {
-    if (state.tick % period == 0) {
-        std::cerr << '[' << state.tick << "]";
-        ((std::cerr << ' ' << args), ...);
-        std::cerr << '\n';
+// Synchronise a parallel vector of items that have a .id attribute and are sorted by id
+template <typename Item, typename ListA, typename InitFn, typename Fn>
+void sync_parallel(ListA& list_a, std::vector<Item>& list_b, InitFn&& init, Fn&& fn) {
+    std::vector<Item> updated;
+    updated.reserve(list_a.size());
+    size_t b_idx = 0;
+    for (auto& a : list_a) {
+        while (b_idx < list_b.size() && list_b[b_idx].id < a.id) {
+            ++b_idx;
+        }
+        if (b_idx < list_b.size() && list_b[b_idx].id == a.id) {
+            updated.push_back(std::move(list_b[b_idx]));
+            ++b_idx;
+        } else {
+            updated.push_back(init(a));
+        }
+        fn(a, updated.back());
     }
+    list_b = std::move(updated);
+}
+
+inline Drone& player_drone(GameState& state) {
+    for (auto& d : state.drones) {
+        if (d.kind == Drone::Kind::Player) return d;
+    }
+    gassert(false);
+}
+inline const Drone& player_drone(const GameState& state) {
+    for (const auto& d : state.drones) {
+        if (d.kind == Drone::Kind::Player) return d;
+    }
+    gassert(false);
 }
