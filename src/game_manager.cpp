@@ -97,7 +97,10 @@ void game_loop(Window& window) {
     while (window.frame()) {
         const float dt = stopwatch.lap();
         if (window.pressed(Key::hash)) {
+            const uint next_drone_id = state.next_drone_id;
             state = initial_state;
+            state.next_drone_id = next_drone_id;
+            for (auto& d : state.drones) d.id = state.next_drone_id++;
             physics_time = 0.0f;
         }
         copy_control(window, player_drone(state).control_m);
