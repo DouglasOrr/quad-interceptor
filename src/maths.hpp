@@ -194,6 +194,15 @@ inline float length(const Vec<N>& v) {
     return std::sqrt(dot(v, v));
 }
 
+template <uint N>
+inline Vec<N> normalise(Vec<N> v) {
+    float inv = length(v);
+    inv = inv > 0.0f ? 1.0f / inv : 0.0f;
+    for (uint i = 0; i < N; ++i)
+        v[i] *= inv;
+    return v;
+}
+
 inline constexpr Vec<3> rotate(Quat q, Vec<3> v) {
     // t = 2 * (q.xyz x v), then v' = v + qw*t + (q.xyz x t)
     Vec<3> qxyz = {q[0], q[1], q[2]};
