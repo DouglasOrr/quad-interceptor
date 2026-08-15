@@ -32,6 +32,7 @@
     OP(void, glUniform1f, GLint, GLfloat)                                                   \
     OP(void, glUniform3fv, GLint, GLsizei, const GLfloat*)                                  \
     OP(void, glUniform2fv, GLint, GLsizei, const GLfloat*)                                  \
+    OP(void, glUniform4fv, GLint, GLsizei, const GLfloat*)                                  \
     OP(void, glGetProgramiv, GLuint, GLenum, GLint*)                                        \
     OP(void, glGetProgramInfoLog, GLuint, GLsizei, GLsizei*, GLchar*)                       \
     OP(void, glDrawArraysInstanced, GLenum, GLint, GLsizei, GLsizei)                        \

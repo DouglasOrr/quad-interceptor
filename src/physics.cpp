@@ -25,28 +25,6 @@ constexpr float lock_on_reset_rate = 1 / 30.0f;
 // City
 constexpr Vec<2> city_building_height_range = {10.0f, 100.0f};
 
-////////////////////////////////////////////////////////////////////////////////
-// Utilities
-
-int64 floordiv(int64 a, int64 b) {
-    return a >= 0 ? a / b : (a - (b - 1)) / b;
-}
-
-uint64 hash_mix(uint64 x) {
-    x ^= x >> 32;
-    x *= 0xd6e8feb86659fd93ULL;
-    x ^= x >> 32;
-    x *= 0xd6e8feb86659fd93ULL;
-    x ^= x >> 32;
-    return x;
-}
-
-template <typename... Args>
-uint64_t hash(uint64_t seed, Args... args) {
-    uint64_t h = seed;
-    ((h = hash_mix(h ^ uint64_t(args))), ...);
-    return h;
-}
 }  // namespace
 
 float Pid::operator()(float control, float actual, float dt) {
@@ -65,6 +43,18 @@ City::Pos City::nearest_cell(Vec<2> v) {
 
 Vec<2> City::cell_center(Pos p) {
     return {(p[0] + 0.5f) * cell_size, (p[1] + 0.5f) * cell_size};
+}
+
+City::Pos City::nearest_intersection_block(Vec<2> v) {
+    constexpr float block_w = float(block_size * cell_size);
+    constexpr float hw = 0.5f * float(street_size * cell_size);
+    return {std::llround((v[0] - hw) / block_w), std::llround((v[1] - hw) / block_w)};
+}
+
+Vec<2> City::intersection_center(Pos block) {
+    constexpr float block_w = float(block_size * cell_size);
+    constexpr float hw = 0.5f * float(street_size * cell_size);
+    return {float(block[0]) * block_w + hw, float(block[1]) * block_w + hw};
 }
 
 Cell City::operator()(Pos p) const {
@@ -169,6 +159,15 @@ void Physics::tick(GameState& state) {
             }
         }
 
+        // Collisions (drones: enemy against objective)
+        if (d.kind == Drone::Kind::Enemy && d.status == Drone::Status::Alive) {
+            Vec<2> d_xy = {d.position[0], d.position[1]};
+            if (length(d_xy - state.objective) <= state.objective_radius) {
+                d.status = Drone::Status::Detonated;
+                if (state.lives > 0) --state.lives;
+            }
+        }
+
         // Collisions (floor)
         if (d.position[2] - Drone::height <= 0.0f) {
             d.position[2] = Drone::height;
@@ -229,6 +228,7 @@ constexpr float ai_hover_altitude = 20.0f;
 constexpr float ai_yaw_deadband = 45.0f * deg_to_rad;
 constexpr float ai_pitch_angle = 30.0f * deg_to_rad;
 constexpr float ai_max_roll_angle = 60.0f * deg_to_rad;
+constexpr float ai_random_direction_frac = 0.5f;
 
 struct DroneAI {
     uint id;
@@ -246,35 +246,45 @@ struct DroneAI {
     std::optional<City::Pos> prev = {};
 };
 
-// Street corners live at cell coordinates ≡ 1 (mod City::block_size), i.e. the
-// centre of a street_size-wide street. Advances to a new corner (excluding the
-// previous, to avoid doubling back) when within 2*cell_size, and returns the
-// world target to fly to.
 Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
-    // Initialise current/prev to the closest street corner if unset.
+    // Initialise current/prev to the closest street intersection if unset.
     if (!a.current) {
-        auto c = City::nearest_cell({pos[0], pos[1]});
-        int64 bx = (int64)std::llround((double)(c[0] - 1) / City::block_size);
-        int64 by = (int64)std::llround((double)(c[1] - 1) / City::block_size);
-        a.current = {bx * (int64)City::block_size + 1, by * (int64)City::block_size + 1};
+        a.current = City::nearest_intersection_block({pos[0], pos[1]});
         a.prev = a.current;
     }
 
-    if (length(City::cell_center(*a.current) - Vec<2>{pos[0], pos[1]}) <= 2.0f * City::cell_size) {
+    if (length(City::intersection_center(*a.current) - Vec<2>{pos[0], pos[1]}) <=
+        2.0f * City::cell_size) {
         City::Pos old_current = *a.current;
-        const int64 b = (int64)City::block_size;
-        City::Pos nbrs[4] = {{old_current[0] + b, old_current[1]},
-                             {old_current[0] - b, old_current[1]},
-                             {old_current[0], old_current[1] + b},
-                             {old_current[0], old_current[1] - b}};
+        City::Pos nbrs[4] = {{old_current[0] + 1, old_current[1]},
+                             {old_current[0] - 1, old_current[1]},
+                             {old_current[0], old_current[1] + 1},
+                             {old_current[0], old_current[1] - 1}};
         std::vector<City::Pos> choices;
         for (auto& n : nbrs)
             if (!a.prev || n != *a.prev) choices.push_back(n);
-        City::Pos next = choices[hash(s.city.seed, s.tick, a.id) % choices.size()];
+
+        auto manhattan_dist = [&](City::Pos p) {
+            Vec<2> c = City::intersection_center(p);
+            return std::abs(c[0] - s.objective[0]) + std::abs(c[1] - s.objective[1]);
+        };
+        float cur_dist = manhattan_dist(old_current);
+        std::vector<City::Pos> reducing;
+        for (auto& n : choices) {
+            if (manhattan_dist(n) < cur_dist) reducing.push_back(n);
+        }
+        City::Pos next;
+        uint64 h = hash(s.city.seed, s.tick, a.id);
+        float u = (h & 0xffff) * (1.0f / float(1 << 16));
+        if (u >= ai_random_direction_frac && !reducing.empty()) {
+            next = reducing[(h >> 16) % reducing.size()];
+        } else {
+            next = choices[(h >> 16) % choices.size()];
+        }
         a.prev = old_current;
         a.current = next;
     }
-    auto target = City::cell_center(*a.current);
+    auto target = City::intersection_center(*a.current);
     return {target[0], target[1], ai_hover_altitude};
 }
 }  // namespace

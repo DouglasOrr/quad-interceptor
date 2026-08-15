@@ -36,19 +36,21 @@ std::vector<Vec<3>> make_cube() {
     return v;
 }
 
-std::vector<Vec<3>> make_cylinder(uint steps) {
+std::vector<Vec<3>> make_cylinder(uint steps, bool caps) {
     std::vector<Vec<3>> v;
     for (auto i = 0u; i < steps; ++i) {
         float a0 = 2.0f * M_PIf * float(i) / float(steps);
         float a1 = 2.0f * M_PIf * float(i + 1) / float(steps);
         float x0 = 0.5f * std::cos(a0), y0 = 0.5f * std::sin(a0);
         float x1 = 0.5f * std::cos(a1), y1 = 0.5f * std::sin(a1);
-        v.push_back({0, 0, 0.5f});
-        v.push_back({x0, y0, 0.5f});
-        v.push_back({x1, y1, 0.5f});
-        v.push_back({0, 0, -0.5f});
-        v.push_back({x1, y1, -0.5f});
-        v.push_back({x0, y0, -0.5f});
+        if (caps) {
+            v.push_back({0, 0, 0.5f});
+            v.push_back({x0, y0, 0.5f});
+            v.push_back({x1, y1, 0.5f});
+            v.push_back({0, 0, -0.5f});
+            v.push_back({x1, y1, -0.5f});
+            v.push_back({x0, y0, -0.5f});
+        }
         v.push_back({x0, y0, -0.5f});
         v.push_back({x0, y0, 0.5f});
         v.push_back({x1, y1, -0.5f});
@@ -197,6 +199,9 @@ struct Uniform {
     }
     void set(const Vec<2>& v) const {
         if (loc >= 0) glUniform2fv(loc, 1, v.data);
+    }
+    void set(const Vec<4>& v) const {
+        if (loc >= 0) glUniform4fv(loc, 1, v.data);
     }
     void set(float f) const {
         if (loc >= 0) glUniform1f(loc, f);
@@ -476,7 +481,7 @@ constexpr Vec<3> light_dir{0.40f, 0.55f, 0.73f};  // world-space direction towar
 constexpr Vec<3> fog_color{0.15f, 0.15f, 0.2f};
 constexpr float fog_end = float(city_radius) * float(City::cell_size);
 constexpr float fog_start = fog_end * 0.5f;
-constexpr int minimap_cells = 20;  // radar radius, in street cells
+constexpr int minimap_cells = 25;  // radar radius, in street cells
 constexpr int minimap_size = 300;  // square side, in pixels
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
@@ -670,6 +675,12 @@ void main(){
             draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
         });
 
+        // Objective marker on minimap
+        u_scale.set(s.objective_radius);
+        u_translate.set(Vec<2>{s.objective[0] - p[0], s.objective[1] - p[1]});
+        u_color.set(Vec<3>{0.2f, 0.9f, 0.4f});
+        ring.draw();
+
         // Lock-on annulus
         if (player.lock_on > 0.0f) {
             glEnable(GL_BLEND);
@@ -822,6 +833,10 @@ void main(){
             std::round(std::sqrt(d.velocity[0] * d.velocity[0] + d.velocity[1] * d.velocity[1])));
         std::snprintf(buf, sizeof(buf), "SPD %3d", spd_v);
         text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, {1.0f, 1.0f, 1.0f});
+
+        std::snprintf(buf, sizeof(buf), "LIVES %1d", s.lives);
+        Vec<3> lives_col = (s.lives > 1) ? Vec<3>{0.2f, 0.9f, 0.4f} : Vec<3>{1.0f, 0.2f, 0.2f};
+        text.draw(buf, text_x, text_y0 + line_h * 4.0f, scale, lives_col);
     }
 };
 
@@ -1303,7 +1318,7 @@ void main(){
 
         std::vector<float> verts;
         auto cube = make_cube();
-        auto cyl = make_cylinder(16);
+        auto cyl = make_cylinder(16, /*caps*/ true);
         float rr = 0.5f * length(Drone::motor_offsets_m[0] - Drone::motor_offsets_m[3]);
         float hh = Drone::height;
         for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
@@ -1353,6 +1368,65 @@ void main(){
     }
 };
 
+// Translucent objective cylinder
+struct ObjectiveView {
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_color;
+    Mesh mesh;
+
+    ObjectiveView() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec3 pos;
+uniform mat4 u_mvp;
+void main(){
+  gl_Position = u_mvp * vec4(pos, 1.0);
+}
+)";
+        const char* f_src = R"(
+#version 330 core
+uniform vec4 u_color;
+out vec4 frag;
+void main(){
+  frag = u_color;
+}
+)";
+        program = GlProgram(v_src, f_src);
+        u_mvp = program.uniform("u_mvp");
+        u_color = program.uniform("u_color");
+
+        auto cyl_verts = make_cylinder(48, /*caps*/ false);
+        mesh.mode = GL_TRIANGLES;
+        mesh.vertex_count = static_cast<GLsizei>(cyl_verts.size());
+        mesh.add({.data = cyl_verts.data(),
+                  .bytes = static_cast<GLsizeiptr>(cyl_verts.size() * sizeof(Vec<3>)),
+                  .loc = 0,
+                  .comps = 3});
+    }
+
+    void draw(const GameState& s, const Mat4& view_projection_mat) {
+        constexpr float cyl_height = 200.0f;
+        Mat4 model = mat_rigid(mat_from(Quat{0.0f, 0.0f, 0.0f, 1.0f}),
+                               {s.objective[0], s.objective[1], cyl_height * 0.5f});
+        Mat4 scale =
+            mat_diag(s.objective_radius * 2.0f, s.objective_radius * 2.0f, cyl_height, 1.0f);
+        Mat4 mvp = mul(view_projection_mat, mul(model, scale));
+
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDepthMask(GL_FALSE);
+
+        program.use();
+        u_mvp.set(mvp);
+        u_color.set(Vec<4>{0.2f, 0.85f, 0.4f, 0.25f});
+        mesh.draw();
+
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
+    }
+};
+
 }  // namespace
 
 struct Renderer::State {
@@ -1362,6 +1436,7 @@ struct Renderer::State {
 
     CityView city;
     DroneView drone;
+    ObjectiveView objective;
     MinimapView minimap;
     HudView hud;
     NoiseOverlayView overlay;
@@ -1398,6 +1473,7 @@ void Renderer::draw(const GameState& s, float dt) {
     // Scene
     state->city.draw(s, view_projection_mat, s.camera_pos);
     state->drone.draw(s, view_projection_mat, s.camera_pos, dt);
+    state->objective.draw(s, view_projection_mat);
 
     // Overlays
     state->minimap.draw(s);

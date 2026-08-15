@@ -13,6 +13,26 @@ inline float sign(float x) {
     return (x > 0.0f) - (x < 0.0f);
 }
 
+inline int64 floordiv(int64 a, int64 b) {
+    return a >= 0 ? a / b : (a - (b - 1)) / b;
+}
+
+inline uint64 hash_mix(uint64 x) {
+    x ^= x >> 32;
+    x *= 0xd6e8feb86659fd93ULL;
+    x ^= x >> 32;
+    x *= 0xd6e8feb86659fd93ULL;
+    x ^= x >> 32;
+    return x;
+}
+
+template <typename... Args>
+uint64 hash(uint64 seed, Args... args) {
+    uint64 h = seed;
+    ((h = hash_mix(h ^ uint64(args))), ...);
+    return h;
+}
+
 template <uint N>
 struct Vec {
     float data[N];

@@ -78,6 +78,8 @@ struct City {
     Cell operator()(Pos p) const;
     static Pos nearest_cell(Vec<2> v);
     static Vec<2> cell_center(Pos p);
+    static Pos nearest_intersection_block(Vec<2> v);
+    static Vec<2> intersection_center(Pos block);
 };
 
 struct GameState {
@@ -89,6 +91,10 @@ struct GameState {
     City city;
     Vec<3> camera_pos;
     Quat camera_orientation;
+    Vec<2> objective;
+    float objective_radius;
+    int lives;
+    uint64 next_enemy_spawn_tick;
 };
 
 Drone& spawn_drone(GameState& state, Drone::Kind kind, Vec<3> position);
