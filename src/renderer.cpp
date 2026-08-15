@@ -672,7 +672,10 @@ void main(){
         foreach_drone(s, [&](size_t, const Drone& d) {
             Vec<3> color = (d.kind == Drone::Kind::Player) ? Vec<3>{0.2f, 0.75f, 0.95f}
                                                            : Vec<3>{0.95f, 0.20f, 0.20f};
-            draw_disc(4.0f * px_to_world, {d.position[0] - p[0], d.position[1] - p[1]}, color);
+            Vec<2> rel = {d.position[0] - p[0], d.position[1] - p[1]};
+            float dist = length(rel);
+            Vec<2> marker_pos = (dist > R && dist > 0.0f) ? (R / dist) * rel : rel;
+            draw_disc(4.0f * px_to_world, marker_pos, color);
         });
 
         // Objective marker on minimap
