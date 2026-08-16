@@ -679,10 +679,12 @@ void main(){
         });
 
         // Objective marker on minimap
-        u_scale.set(s.objective_radius);
-        u_translate.set(Vec<2>{s.objective[0] - p[0], s.objective[1] - p[1]});
-        u_color.set(Vec<3>{0.2f, 0.9f, 0.4f});
-        ring.draw();
+        for (const Circle& o : s.mission.objectives) {
+            u_scale.set(o.radius);
+            u_translate.set(Vec<2>{o.center[0] - p[0], o.center[1] - p[1]});
+            u_color.set(Vec<3>{0.2f, 0.9f, 0.4f});
+            ring.draw();
+        }
 
         // Lock-on annulus
         if (player.lock_on > 0.0f) {
@@ -837,9 +839,11 @@ void main(){
         std::snprintf(buf, sizeof(buf), "SPD %3d", spd_v);
         text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, {1.0f, 1.0f, 1.0f});
 
-        std::snprintf(buf, sizeof(buf), "LIVES %1d", s.lives);
-        Vec<3> lives_col = (s.lives > 1) ? Vec<3>{0.2f, 0.9f, 0.4f} : Vec<3>{1.0f, 0.2f, 0.2f};
-        text.draw(buf, text_x, text_y0 + line_h * 4.0f, scale, lives_col);
+        if (s.mission.starting_lives) {
+            std::snprintf(buf, sizeof(buf), "LIVES %1d", s.lives);
+            Vec<3> lives_col = (s.lives > 1) ? Vec<3>{0.2f, 0.9f, 0.4f} : Vec<3>{1.0f, 0.2f, 0.2f};
+            text.draw(buf, text_x, text_y0 + line_h * 4.0f, scale, lives_col);
+        }
     }
 };
 
@@ -1410,21 +1414,19 @@ void main(){
 
     void draw(const GameState& s, const Mat4& view_projection_mat) {
         constexpr float cyl_height = 200.0f;
-        Mat4 model = mat_rigid(mat_from(Quat{0.0f, 0.0f, 0.0f, 1.0f}),
-                               {s.objective[0], s.objective[1], cyl_height * 0.5f});
-        Mat4 scale =
-            mat_diag(s.objective_radius * 2.0f, s.objective_radius * 2.0f, cyl_height, 1.0f);
-        Mat4 mvp = mul(view_projection_mat, mul(model, scale));
-
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
-
         program.use();
-        u_mvp.set(mvp);
         u_color.set(Vec<4>{0.2f, 0.85f, 0.4f, 0.25f});
-        mesh.draw();
-
+        for (const Circle& o : s.mission.objectives) {
+            Mat4 model = mat_rigid(mat_from(Quat{0.0f, 0.0f, 0.0f, 1.0f}),
+                                   {o.center[0], o.center[1], cyl_height * 0.5f});
+            Mat4 scale = mat_diag(o.radius * 2.0f, o.radius * 2.0f, cyl_height, 1.0f);
+            Mat4 mvp = mul(view_projection_mat, mul(model, scale));
+            u_mvp.set(mvp);
+            mesh.draw();
+        }
         glDepthMask(GL_TRUE);
         glDisable(GL_BLEND);
     }

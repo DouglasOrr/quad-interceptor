@@ -35,11 +35,22 @@ Font Font::load() {
 // GameManager
 
 namespace {
+constexpr float city_blocks(float n) {
+    return n * float(City::block_size) * float(City::cell_size);
+}
+
 constexpr float respawn_delay = 2.0f;
-constexpr float enemy_spawn_interval = 10.0f;
-constexpr size_t max_enemy_drones = 3;
-constexpr float enemy_spawn_radius = 3.0f * float(City::block_size) * float(City::cell_size);
+constexpr float player_spawn_alt = 5.0f;
+constexpr float enemy_spawn_alt = 20.0f;
+constexpr float sandbox_kill_radius = city_blocks(6);
 constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
+
+Vec<3> player_spawn(const GameState& s) {
+    Vec<2> c = s.mission.objectives.empty()
+                   ? City::intersection_center(City::nearest_intersection_block({0.0f, 0.0f}))
+                   : s.mission.objectives[0].center;
+    return {c[0], c[1], player_spawn_alt};
+}
 
 Drone& spawn_drone(uint& next_drone_id, GameState& s, Drone::Kind kind, Vec<3> position) {
     if (kind == Drone::Kind::Player) {
@@ -65,6 +76,28 @@ Drone& spawn_drone(uint& next_drone_id, GameState& s, Drone::Kind kind, Vec<3> p
 }
 }  // namespace
 
+std::vector<Mission> Mission::all() {
+    Mission defense;
+    defense.type = Mission::Defense;
+    defense.name = "defense";
+    defense.enemy_spawn_radius = city_blocks(3);
+    defense.enemy_spawn_interval = 10.0f;
+    defense.max_enemies = 3;
+    defense.starting_lives = 5;
+    defense.objectives = {Circle{
+        City::intersection_center(City::nearest_intersection_block({0, 0})), City::cell_size}};
+
+    Mission sandbox;
+    sandbox.type = Mission::Sandbox;
+    sandbox.name = "sandbox";
+    sandbox.enemy_spawn_radius = city_blocks(2);
+    sandbox.enemy_spawn_interval = 10.0f;
+    sandbox.max_enemies = 3;
+    sandbox.starting_lives = 0;
+
+    return {defense, sandbox};
+}
+
 struct GameManager::State {
     uint next_drone_id = 0;
     uint64 player_respawn_tick = 0;
@@ -75,48 +108,56 @@ GameManager::GameManager() : state(std::make_unique<State>()) {}
 GameManager::~GameManager() = default;
 
 void GameManager::update(GameState& s) {
-    // Enemy cleanup
-    std::erase_if(s.drones, [](const Drone& d) {
-        return d.kind == Drone::Kind::Enemy && d.status != Drone::Status::Alive;
-    });
-
-    // Player spawn
+    // Ensure a player exists (initial spawn / after a dead player is cleaned up).
     bool has_player = std::any_of(s.drones.begin(), s.drones.end(),
                                   [](auto& d) { return d.kind == Drone::Kind::Player; });
-    if (!has_player) spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.spawn);
+    if (!has_player) spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s));
 
     // Player respawn
-    auto& player = player_drone(s);
-    if (player.status == Drone::Status::Alive) {
+    if (player_drone(s).status == Drone::Status::Alive) {
         state->player_respawn_tick = 0;
     } else {
         if (state->player_respawn_tick == 0)
             state->player_respawn_tick = s.tick + uint64(respawn_delay / Physics::dt);
         if (s.tick >= state->player_respawn_tick) {
             state->player_respawn_tick = 0;
-            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.spawn);
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s));
         }
     }
+    auto& player = player_drone(s);
 
-    // Enemy respawn
+    // Enemy cleanup: dead drones, and (sandbox) drones strayed beyond the kill radius.
+    std::erase_if(s.drones, [&](const Drone& d) {
+        if (d.kind != Drone::Kind::Enemy) return false;
+        if (d.status != Drone::Status::Alive) return true;
+        if (s.mission.type == Mission::Sandbox) {
+            Vec<2> rel = {d.position[0] - player.position[0], d.position[1] - player.position[1]};
+            return length(rel) > sandbox_kill_radius;
+        }
+        return false;
+    });
+
+    // Enemy spawn
     if (state->next_enemy_spawn_tick == 0) {
-        state->next_enemy_spawn_tick = s.tick + uint64(enemy_spawn_interval / Physics::dt);
+        state->next_enemy_spawn_tick =
+            s.tick + uint64(s.mission.enemy_spawn_interval / Physics::dt);
     } else if (s.tick >= state->next_enemy_spawn_tick) {
         size_t enemy_count = 0;
         foreach_drone(s, [&](size_t, const Drone& d) {
             if (d.kind == Drone::Kind::Enemy) ++enemy_count;
         });
-        if (enemy_count < max_enemy_drones) {
+        if (enemy_count < s.mission.max_enemies) {
             uint64 h = hash(s.city.seed, s.tick, state->next_drone_id);
-            float angle = (h & 0xffffff) * (2.0f * pi / float(1 << 24));
-            Vec<2> target_pos = {
-                s.objective[0] + enemy_spawn_radius * std::cos(angle),
-                s.objective[1] + enemy_spawn_radius * std::sin(angle),
-            };
+            float angle = (h & 0xffff) * (2.0f * pi / float(1 << 16));
+            Vec<2> center = s.mission.objectives.empty()
+                                ? Vec<2>{player.position[0], player.position[1]}
+                                : s.mission.objectives[0].center;
+            Vec<2> target_pos = {center[0] + s.mission.enemy_spawn_radius * std::cos(angle),
+                                 center[1] + s.mission.enemy_spawn_radius * std::sin(angle)};
             Vec<2> spawn_xy =
                 City::intersection_center(City::nearest_intersection_block(target_pos));
             spawn_drone(state->next_drone_id, s, Drone::Kind::Enemy,
-                        {spawn_xy[0], spawn_xy[1], 20.0f});
+                        {spawn_xy[0], spawn_xy[1], enemy_spawn_alt});
             state->next_enemy_spawn_tick = 0;
         }
     }
@@ -143,13 +184,10 @@ void copy_control(const Window& w, Vec<4>& c) {
 }
 }  // namespace
 
-void game_loop(Window& window) {
+void game_loop(Window& window, const Mission& mission) {
     GameState state{};
-    auto C = float(City::cell_size);
-    state.objective = City::intersection_center(City::nearest_intersection_block({C, C}));
-    state.objective_radius = C;
-    state.lives = 5;
-    state.spawn = {state.objective[0], state.objective[1], 5.0f};
+    state.mission = mission;
+    state.lives = state.mission.starting_lives;
     GameManager game_manager;
     game_manager.update(state);
     AI ai;
@@ -163,7 +201,7 @@ void game_loop(Window& window) {
     while (window.frame()) {
         const float dt = stopwatch.lap();
         if (window.pressed(Key::hash)) {
-            game_loop(window);
+            game_loop(window, mission);
             return;
         }
         copy_control(window, player_drone(state).control_m);
@@ -177,4 +215,5 @@ void game_loop(Window& window) {
         renderer.draw(state, dt);
         audio_engine.update(state);
     }
+    window.set_audio_callback({});  // the window's callback can still call into the audio_engine
 }

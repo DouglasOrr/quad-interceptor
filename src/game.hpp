@@ -7,11 +7,17 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "maths.hpp"
 
 struct Window;  // defined in platform.hpp
+
+struct Circle {
+    Vec<2> center;
+    float radius;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // State
@@ -82,18 +88,27 @@ struct City {
     static Vec<2> intersection_center(Pos block);
 };
 
+struct Mission {
+    enum Type { Defense, Sandbox };
+    Type type;
+    std::string name;
+    std::vector<Circle> objectives;  // empty in sandbox
+    float enemy_spawn_radius;        // around objective (defense) or player (sandbox)
+    float enemy_spawn_interval;
+    uint max_enemies;
+    uint starting_lives;  // defense only, 0 otherwise
+
+    static std::vector<Mission> all();
+};
+
 struct GameState {
     uint64 tick;
     std::vector<Drone> drones;
-    City city;
     Vec<3> camera_pos;
     Quat camera_orientation;
-
-    // Mission
-    Vec<3> spawn;
-    Vec<2> objective;
-    float objective_radius;
-    int lives;
+    City city;
+    Mission mission;
+    uint lives;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -110,7 +125,7 @@ private:
     std::unique_ptr<State> state;
 };
 
-void game_loop(Window& window);
+void game_loop(Window& window, const Mission& mission);
 
 struct Font {
     struct Glyph {

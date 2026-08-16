@@ -137,11 +137,15 @@ void Physics::tick(GameState& state) {
         }
 
         // Collisions (drones: enemy against objective)
-        if (d.kind == Drone::Kind::Enemy && d.status == Drone::Status::Alive) {
-            Vec<2> d_xy = {d.position[0], d.position[1]};
-            if (length(d_xy - state.objective) <= state.objective_radius) {
-                d.status = Drone::Status::Detonated;
-                if (state.lives > 0) --state.lives;
+        if (state.mission.type == Mission::Defense && d.kind == Drone::Kind::Enemy &&
+            d.status == Drone::Status::Alive) {
+            for (const auto& o : state.mission.objectives) {
+                Vec<2> d_xy = {d.position[0], d.position[1]};
+                if (length(d_xy - o.center) <= o.radius) {
+                    d.status = Drone::Status::Detonated;
+                    if (state.lives > 0) --state.lives;
+                    break;
+                }
             }
         }
 
@@ -241,14 +245,18 @@ Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
         for (auto& n : nbrs)
             if (!a.prev || n != *a.prev) choices.push_back(n);
 
-        auto manhattan_dist = [&](City::Pos p) {
-            Vec<2> c = City::intersection_center(p);
-            return std::abs(c[0] - s.objective[0]) + std::abs(c[1] - s.objective[1]);
-        };
-        float cur_dist = manhattan_dist(old_current);
+        // Bias random walks toward the objective (defense); wander freely otherwise.
         std::vector<City::Pos> reducing;
-        for (auto& n : choices) {
-            if (manhattan_dist(n) < cur_dist) reducing.push_back(n);
+        if (s.mission.type == Mission::Defense) {
+            Vec<2> obj = s.mission.objectives[0].center;
+            auto manhattan_dist = [&](City::Pos p) {
+                Vec<2> c = City::intersection_center(p);
+                return std::abs(c[0] - obj[0]) + std::abs(c[1] - obj[1]);
+            };
+            float cur_dist = manhattan_dist(old_current);
+            for (auto& n : choices) {
+                if (manhattan_dist(n) < cur_dist) reducing.push_back(n);
+            }
         }
         City::Pos next;
         uint64 h = hash(s.city.seed, s.tick, a.id);
