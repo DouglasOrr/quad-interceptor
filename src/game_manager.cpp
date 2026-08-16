@@ -71,7 +71,7 @@ void GameManager::update(GameState& state) {
         });
         if (enemy_count < max_enemy_drones) {
             uint64 h = hash(state.city.seed, state.tick, state.next_drone_id);
-            float angle = (h & 0xffffff) * (2.0f * M_PIf / float(1 << 24));
+            float angle = (h & 0xffffff) * (2.0f * pi / float(1 << 24));
             Vec<2> target_pos = {
                 state.objective[0] + enemy_spawn_radius * std::cos(angle),
                 state.objective[1] + enemy_spawn_radius * std::sin(angle),

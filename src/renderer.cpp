@@ -39,8 +39,8 @@ std::vector<Vec<3>> make_cube() {
 std::vector<Vec<3>> make_cylinder(uint steps, bool caps) {
     std::vector<Vec<3>> v;
     for (auto i = 0u; i < steps; ++i) {
-        float a0 = 2.0f * M_PIf * float(i) / float(steps);
-        float a1 = 2.0f * M_PIf * float(i + 1) / float(steps);
+        float a0 = 2.0f * pi * float(i) / float(steps);
+        float a1 = 2.0f * pi * float(i + 1) / float(steps);
         float x0 = 0.5f * std::cos(a0), y0 = 0.5f * std::sin(a0);
         float x1 = 0.5f * std::cos(a1), y1 = 0.5f * std::sin(a1);
         if (caps) {
@@ -583,7 +583,7 @@ void main(){
         std::vector<float> disc_verts = {0.0f, 0.0f};
         constexpr int n_seg = 64;  // circle smoothness
         for (int i = 0; i <= n_seg; ++i) {
-            float a = 2.0f * M_PIf * float(i % n_seg) / float(n_seg);
+            float a = 2.0f * pi * float(i % n_seg) / float(n_seg);
             disc_verts.insert(disc_verts.end(), {std::cos(a), std::sin(a)});
         }
         disc.mode = GL_TRIANGLE_FAN;
@@ -620,7 +620,7 @@ void main(){
 
         // Heading-up radar: rotate so the player's forward points up.
         const Vec<3> fwd = rotate(player.orientation, Vec<3>{1.0f, 0.0f, 0.0f});
-        const float phi = M_PIf / 2.0f - std::atan2(fwd[1], fwd[0]);
+        const float phi = pi / 2.0f - std::atan2(fwd[1], fwd[0]);
         const Quat heading{0.0f, 0.0f, std::sin(phi / 2.0f), std::cos(phi / 2.0f)};
         const Mat4 mvp = mul(mat_ortho(-R, R, -R, R), mat_from(heading, {0.0f, 0.0f, 0.0f}));
 
@@ -816,8 +816,8 @@ void main(){
         const float scale = 1.1f;
         const float line_h = text.font.height * scale * 1.5f;
 
-        int p_v = int(std::round((pitch * 180.0f / M_PIf) / 5.0f)) * 5;
-        int r_v = int(std::round((roll * 180.0f / M_PIf) / 5.0f)) * 5;
+        int p_v = int(std::round(pitch * rad_to_deg / 5.0f)) * 5;
+        int r_v = int(std::round(roll * rad_to_deg / 5.0f)) * 5;
         std::snprintf(buf, sizeof(buf), "P/R %+3d %+1d", p_v, r_v);
         text.draw(buf, text_x, text_y0 + line_h * 1.0f, scale, {1.0f, 1.0f, 1.0f});
 
@@ -1324,7 +1324,7 @@ void main(){
         auto cyl = make_cylinder(16, /*caps*/ true);
         float rr = 0.5f * length(Drone::motor_offsets_m[0] - Drone::motor_offsets_m[3]);
         float hh = Drone::height;
-        for (float ang : {M_PIf / 4.0f, -M_PIf / 4.0f}) {
+        for (float ang : {pi / 4.0f, -pi / 4.0f}) {
             Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
             Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),
                              mat_diag(rr * 2, hh * 0.25f, hh * 0.25f, 1.0f));
@@ -1451,7 +1451,7 @@ struct Renderer::State {
 };
 
 Renderer::Renderer() : state(std::make_unique<State>()) {
-    state->projection = mat_perspective(fov_deg * (M_PIf / 180.0f), 16.0f / 9.0f, 0.1f, 1000.0f);
+    state->projection = mat_perspective(fov_deg * deg_to_rad, 16.0f / 9.0f, 0.1f, 1000.0f);
 
     // Default state
     glEnable(GL_DEPTH_TEST);

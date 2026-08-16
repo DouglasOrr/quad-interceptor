@@ -6,8 +6,9 @@
 using uint = unsigned int;
 using int64 = long long;
 using uint64 = unsigned long long;
-constexpr float deg_to_rad = M_PIf / 180.0f;
-constexpr float rad_to_deg = 180.0f / M_PIf;
+constexpr float pi = M_PIf;
+constexpr float deg_to_rad = pi / 180.0f;
+constexpr float rad_to_deg = 180.0f / pi;
 
 inline float sign(float x) {
     return (x > 0.0f) - (x < 0.0f);
