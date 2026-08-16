@@ -98,29 +98,6 @@ bool hits_building(const City& city, Vec<3> p, float r) {
 }
 }  // namespace
 
-Drone& spawn_drone(GameState& state, Drone::Kind kind, Vec<3> position) {
-    if (kind == Drone::Kind::Player) {
-        std::erase_if(state.drones, [](const Drone& d) { return d.kind == Drone::Kind::Player; });
-    }
-    Drone d;
-    d.id = state.next_drone_id++;
-    d.kind = kind;
-    d.position = position;
-    d.velocity = {};
-    d.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
-    d.ang_momentum = {};
-    d.status = Drone::Status::Alive;
-    d.lock_on = 0;
-    d.control_m = {};
-    d.motor_speed = {};
-    Pid rot = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    lift.enabled = false;
-    d.pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
-    state.drones.push_back(d);
-    return state.drones.back();
-}
-
 ////////////////////////////////////////////////////////////////////////////////
 // Physics
 

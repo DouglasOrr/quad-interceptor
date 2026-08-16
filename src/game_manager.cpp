@@ -40,53 +40,91 @@ constexpr float enemy_spawn_interval = 10.0f;
 constexpr size_t max_enemy_drones = 3;
 constexpr float enemy_spawn_radius = 3.0f * float(City::block_size) * float(City::cell_size);
 constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
+
+Drone& spawn_drone(uint& next_drone_id, GameState& s, Drone::Kind kind, Vec<3> position) {
+    if (kind == Drone::Kind::Player) {
+        std::erase_if(s.drones, [](const Drone& d) { return d.kind == Drone::Kind::Player; });
+    }
+    Drone d;
+    d.id = next_drone_id++;
+    d.kind = kind;
+    d.position = position;
+    d.velocity = {};
+    d.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
+    d.ang_momentum = {};
+    d.status = Drone::Status::Alive;
+    d.lock_on = 0;
+    d.control_m = {};
+    d.motor_speed = {};
+    Pid rot = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    lift.enabled = false;
+    d.pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
+    s.drones.push_back(d);
+    return s.drones.back();
+}
 }  // namespace
 
-void GameManager::update(GameState& state) {
+struct GameManager::State {
+    uint next_drone_id = 0;
+    uint64 player_respawn_tick = 0;
+    uint64 next_enemy_spawn_tick = 0;
+};
+
+GameManager::GameManager() : state(std::make_unique<State>()) {}
+GameManager::~GameManager() = default;
+
+void GameManager::update(GameState& s) {
     // Enemy cleanup
-    std::erase_if(state.drones, [](const Drone& d) {
+    std::erase_if(s.drones, [](const Drone& d) {
         return d.kind == Drone::Kind::Enemy && d.status != Drone::Status::Alive;
     });
 
+    // Player spawn
+    bool has_player = std::any_of(s.drones.begin(), s.drones.end(),
+                                  [](auto& d) { return d.kind == Drone::Kind::Player; });
+    if (!has_player) spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.spawn);
+
     // Player respawn
-    auto& player = player_drone(state);
-    if (player.status != Drone::Status::Alive) {
-        if (state.respawn_time == 0)
-            state.respawn_time = state.tick + uint64(respawn_delay / Physics::dt);
-        if (state.tick >= state.respawn_time) {
-            state.respawn_time = 0;
-            spawn_drone(state, Drone::Kind::Player, state.spawn);
-        }
+    auto& player = player_drone(s);
+    if (player.status == Drone::Status::Alive) {
+        state->player_respawn_tick = 0;
     } else {
-        state.respawn_time = 0;
+        if (state->player_respawn_tick == 0)
+            state->player_respawn_tick = s.tick + uint64(respawn_delay / Physics::dt);
+        if (s.tick >= state->player_respawn_tick) {
+            state->player_respawn_tick = 0;
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.spawn);
+        }
     }
 
     // Enemy respawn
-    if (state.next_enemy_spawn_tick == 0) {
-        state.next_enemy_spawn_tick = state.tick + uint64(enemy_spawn_interval / Physics::dt);
-    } else if (state.tick >= state.next_enemy_spawn_tick) {
+    if (state->next_enemy_spawn_tick == 0) {
+        state->next_enemy_spawn_tick = s.tick + uint64(enemy_spawn_interval / Physics::dt);
+    } else if (s.tick >= state->next_enemy_spawn_tick) {
         size_t enemy_count = 0;
-        foreach_drone(state, [&](size_t, const Drone& d) {
+        foreach_drone(s, [&](size_t, const Drone& d) {
             if (d.kind == Drone::Kind::Enemy) ++enemy_count;
         });
         if (enemy_count < max_enemy_drones) {
-            uint64 h = hash(state.city.seed, state.tick, state.next_drone_id);
+            uint64 h = hash(s.city.seed, s.tick, state->next_drone_id);
             float angle = (h & 0xffffff) * (2.0f * pi / float(1 << 24));
             Vec<2> target_pos = {
-                state.objective[0] + enemy_spawn_radius * std::cos(angle),
-                state.objective[1] + enemy_spawn_radius * std::sin(angle),
+                s.objective[0] + enemy_spawn_radius * std::cos(angle),
+                s.objective[1] + enemy_spawn_radius * std::sin(angle),
             };
             Vec<2> spawn_xy =
                 City::intersection_center(City::nearest_intersection_block(target_pos));
-            spawn_drone(state, Drone::Kind::Enemy, {spawn_xy[0], spawn_xy[1], 20.0f});
-            state.next_enemy_spawn_tick = 0;
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Enemy,
+                        {spawn_xy[0], spawn_xy[1], 20.0f});
+            state->next_enemy_spawn_tick = 0;
         }
     }
 
     // Player camera update
-    const auto& p = player_drone(state);
-    state.camera_pos = p.position + rotate(p.orientation, cam_offset_vec);
-    state.camera_orientation = p.orientation;
+    const auto& p = player_drone(s);
+    s.camera_pos = p.position + rotate(p.orientation, cam_offset_vec);
+    s.camera_orientation = p.orientation;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -112,9 +150,8 @@ void game_loop(Window& window) {
     state.objective_radius = C;
     state.lives = 5;
     state.spawn = {state.objective[0], state.objective[1], 5.0f};
-    spawn_drone(state, Drone::Kind::Player, state.spawn);
-    auto initial_state = state;
     GameManager game_manager;
+    game_manager.update(state);
     AI ai;
     Renderer renderer;
     AudioEngine audio_engine;
@@ -126,12 +163,8 @@ void game_loop(Window& window) {
     while (window.frame()) {
         const float dt = stopwatch.lap();
         if (window.pressed(Key::hash)) {
-            const uint next_drone_id = state.next_drone_id;
-            state = initial_state;
-            state.next_drone_id = next_drone_id;
-            for (auto& d : state.drones)
-                d.id = state.next_drone_id++;
-            physics_time = 0.0f;
+            game_loop(window);
+            return;
         }
         copy_control(window, player_drone(state).control_m);
         ai.update(state);

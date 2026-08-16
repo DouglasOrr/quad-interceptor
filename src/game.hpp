@@ -84,26 +84,30 @@ struct City {
 
 struct GameState {
     uint64 tick;
-    Vec<3> spawn;         // player respawn position
-    uint64 respawn_time;  // physics tick at which the player respawns (0 = none)
-    uint next_drone_id;
     std::vector<Drone> drones;
     City city;
     Vec<3> camera_pos;
     Quat camera_orientation;
+
+    // Mission
+    Vec<3> spawn;
     Vec<2> objective;
     float objective_radius;
     int lives;
-    uint64 next_enemy_spawn_tick;
 };
-
-Drone& spawn_drone(GameState& state, Drone::Kind kind, Vec<3> position);
 
 ///////////////////////////////////////////////////////////////////////////////
 // Game Manager & Assets (game_manager.cpp)
 
 struct GameManager {
+    GameManager();
+    ~GameManager();
+
     void update(GameState& state);
+
+private:
+    struct State;
+    std::unique_ptr<State> state;
 };
 
 void game_loop(Window& window);
