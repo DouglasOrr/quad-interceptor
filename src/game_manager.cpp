@@ -48,7 +48,7 @@ constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly 
 Vec<3> player_spawn(const GameState& s) {
     Vec<2> c = s.mission.objectives.empty()
                    ? City::intersection_center(City::nearest_intersection_block({0.0f, 0.0f}))
-                   : s.mission.objectives[0].center;
+                   : s.mission.objectives[std::max(s.next_objective, 1u) - 1].center;
     return {c[0], c[1], player_spawn_alt};
 }
 
@@ -95,7 +95,20 @@ std::vector<Mission> Mission::all() {
     sandbox.max_enemies = 3;
     sandbox.starting_lives = 0;
 
-    return {defense, sandbox};
+    Mission race;
+    race.type = Mission::Race;
+    race.name = "race";
+    race.enemy_spawn_radius = 0.0f;
+    race.enemy_spawn_interval = 0.0f;
+    race.max_enemies = 0;
+    race.starting_lives = 0;
+    const std::vector<City::Pos> waypoints = {{0, 0},  {0, 2},   {2, 2},  {2, 0}, {2, -2},
+                                              {0, -2}, {-2, -2}, {-2, 0}, {0, 0}};
+    for (auto p : waypoints) {
+        race.objectives.push_back({City::intersection_center(p), float(City::cell_size)});
+    }
+
+    return {defense, sandbox, race};
 }
 
 struct GameManager::State {
@@ -138,7 +151,9 @@ void GameManager::update(GameState& s) {
     });
 
     // Enemy spawn
-    if (state->next_enemy_spawn_tick == 0) {
+    if (s.mission.max_enemies == 0) {
+        // pass
+    } else if (state->next_enemy_spawn_tick == 0) {
         state->next_enemy_spawn_tick =
             s.tick + uint64(s.mission.enemy_spawn_interval / Physics::dt);
     } else if (s.tick >= state->next_enemy_spawn_tick) {

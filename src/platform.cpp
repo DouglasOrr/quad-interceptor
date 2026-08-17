@@ -140,5 +140,7 @@ bool Window::pressed(Key k) const {
 }
 
 void Window::set_audio_callback(std::function<void(int16_t* stream, int num_frames)> callback) {
+    if (state->audio_dev != 0) SDL_LockAudioDevice(state->audio_dev);
     state->audio_callback = std::move(callback);
+    if (state->audio_dev != 0) SDL_UnlockAudioDevice(state->audio_dev);
 }

@@ -89,7 +89,7 @@ struct City {
 };
 
 struct Mission {
-    enum Type { Defense, Sandbox };
+    enum Type { Defense, Sandbox, Race };
     Type type;
     std::string name;
     std::vector<Circle> objectives;  // empty in sandbox
@@ -108,7 +108,10 @@ struct GameState {
     Quat camera_orientation;
     City city;
     Mission mission;
+    // Mission state
     uint lives;
+    uint next_objective;
+    std::optional<uint64> timer;
 };
 
 ///////////////////////////////////////////////////////////////////////////////

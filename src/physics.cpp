@@ -199,6 +199,30 @@ void Physics::tick(GameState& state) {
         d.ang_momentum += dt * (torque - mul(R, mul(ang_damping_m, ang_vel_m)));
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));
     });
+
+    if (state.mission.type == Mission::Race) {
+        auto finished = state.next_objective >= state.mission.objectives.size();
+        if ((player.status == Drone::Status::Alive) && !finished) {
+            Vec<2> p_xy = {player.position[0], player.position[1]};
+            if (!state.timer) {
+                // Race starts when leaving objective 0
+                if (length(p_xy - state.mission.objectives[0].center) >
+                    state.mission.objectives[0].radius) {
+                    state.timer = 0;
+                    state.next_objective = 1;
+                }
+            } else {
+                // Reached next objective
+                if (length(p_xy - state.mission.objectives[state.next_objective].center) <=
+                    state.mission.objectives[state.next_objective].radius) {
+                    ++state.next_objective;
+                }
+            }
+        }
+        if (state.timer && !finished) {
+            ++*state.timer;
+        }
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

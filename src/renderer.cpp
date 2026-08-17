@@ -679,10 +679,21 @@ void main(){
         });
 
         // Objective marker on minimap
-        for (const Circle& o : s.mission.objectives) {
+        for (auto i = 0u; i < s.mission.objectives.size(); ++i) {
+            const Circle& o = s.mission.objectives[i];
             u_scale.set(o.radius);
             u_translate.set(Vec<2>{o.center[0] - p[0], o.center[1] - p[1]});
-            u_color.set(Vec<3>{0.2f, 0.9f, 0.4f});
+            Vec<3> color;
+            if (s.mission.type != Mission::Race) {
+                color = {0.2f, 0.9f, 0.4f};
+            } else if (i == s.next_objective) {
+                color = {0.2f, 0.9f, 0.4f};
+            } else if (i == s.next_objective + 1) {
+                color = {0.95f, 0.85f, 0.2f};
+            } else {
+                color = {0.5f, 0.5f, 0.5f};
+            }
+            u_color.set(color);
             ring.draw();
         }
 
@@ -843,6 +854,16 @@ void main(){
             std::snprintf(buf, sizeof(buf), "LIVES %1d", s.lives);
             Vec<3> lives_col = (s.lives > 1) ? Vec<3>{0.2f, 0.9f, 0.4f} : Vec<3>{1.0f, 0.2f, 0.2f};
             text.draw(buf, text_x, text_y0 + line_h * 4.0f, scale, lives_col);
+        }
+
+        if (s.mission.type == Mission::Race) {
+            float sec = float(s.timer.value_or(0)) * Physics::dt;
+            std::snprintf(buf, sizeof(buf), "%.1fs", sec);
+            const float timer_scale = 1.8f;
+            const float timer_w = float(std::strlen(buf)) * text.font.width * timer_scale;
+            const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
+            const float timer_y = 24.0f;
+            text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
         }
     }
 };
@@ -1418,8 +1439,19 @@ void main(){
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glDepthMask(GL_FALSE);
         program.use();
-        u_color.set(Vec<4>{0.2f, 0.85f, 0.4f, 0.25f});
-        for (const Circle& o : s.mission.objectives) {
+        for (size_t i = 0; i < s.mission.objectives.size(); ++i) {
+            const Circle& o = s.mission.objectives[i];
+            Vec<4> color;
+            if (s.mission.type != Mission::Race) {
+                color = {0.2f, 0.85f, 0.4f, 0.25f};
+            } else if (i == s.next_objective) {
+                color = {0.2f, 0.85f, 0.4f, 0.25f};
+            } else if (i == s.next_objective + 1) {
+                color = {0.95f, 0.85f, 0.2f, 0.25f};
+            } else {
+                color = {0.5f, 0.5f, 0.5f, 0.25f};
+            }
+            u_color.set(color);
             Mat4 model = mat_rigid(mat_from(Quat{0.0f, 0.0f, 0.0f, 1.0f}),
                                    {o.center[0], o.center[1], cyl_height * 0.5f});
             Mat4 scale = mat_diag(o.radius * 2.0f, o.radius * 2.0f, cyl_height, 1.0f);
