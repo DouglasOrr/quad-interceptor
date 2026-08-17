@@ -89,14 +89,15 @@ struct City {
 };
 
 struct Mission {
-    enum Type { Defense, Sandbox, Race };
+    enum Type { Defense, Sandbox, Race, Chase };
     Type type;
     std::string name;
     std::vector<Circle> objectives;  // empty in sandbox
-    float enemy_spawn_radius;        // around objective (defense) or player (sandbox)
+    float enemy_spawn_radius;        // around objective (defense) or player (sandbox, chase)
     float enemy_spawn_interval;
     uint max_enemies;
-    uint starting_lives;  // defense only, 0 otherwise
+    uint starting_lives;
+    float time_limit;
 
     static std::vector<Mission> all();
 };
@@ -110,6 +111,7 @@ struct GameState {
     Mission mission;
     // Mission state
     uint lives;
+    uint kill_count;
     uint next_objective;
     std::optional<uint64> timer;
 };

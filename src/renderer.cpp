@@ -856,13 +856,19 @@ void main(){
             text.draw(buf, text_x, text_y0 + line_h * 4.0f, scale, lives_col);
         }
 
+        const float timer_scale = 1.8f;
+        const float timer_y = 24.0f;
         if (s.mission.type == Mission::Race) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
             std::snprintf(buf, sizeof(buf), "%.1fs", sec);
-            const float timer_scale = 1.8f;
             const float timer_w = float(std::strlen(buf)) * text.font.width * timer_scale;
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
-            const float timer_y = 24.0f;
+            text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
+        } else if (s.mission.type == Mission::Chase) {
+            float sec = float(s.timer.value_or(0)) * Physics::dt;
+            std::snprintf(buf, sizeof(buf), "%.1fs  CAUGHT %u", sec, s.kill_count);
+            const float timer_w = float(std::strlen(buf)) * text.font.width * timer_scale;
+            const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
             text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
         }
     }

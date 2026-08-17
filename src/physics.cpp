@@ -133,6 +133,7 @@ void Physics::tick(GameState& state) {
             if (length(d.position - player.position) < explosion_radius) {
                 d.status = Drone::Status::Detonated;
                 player.status = Drone::Status::Detonated;
+                ++state.kill_count;
             }
         }
 
@@ -221,6 +222,12 @@ void Physics::tick(GameState& state) {
         }
         if (state.timer && !finished) {
             ++*state.timer;
+        }
+    }
+
+    if (state.mission.type == Mission::Chase) {
+        if (state.timer && *state.timer > 0) {
+            --*state.timer;
         }
     }
 }

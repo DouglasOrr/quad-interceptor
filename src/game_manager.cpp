@@ -43,12 +43,19 @@ constexpr float respawn_delay = 2.0f;
 constexpr float player_spawn_alt = 5.0f;
 constexpr float enemy_spawn_alt = 20.0f;
 constexpr float sandbox_kill_radius = city_blocks(6);
+constexpr float chase_escape_radius = city_blocks(2.5);
 constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
 
-Vec<3> player_spawn(const GameState& s) {
-    Vec<2> c = s.mission.objectives.empty()
-                   ? City::intersection_center(City::nearest_intersection_block({0.0f, 0.0f}))
-                   : s.mission.objectives[std::max(s.next_objective, 1u) - 1].center;
+Vec<3> player_spawn(const GameState& s, const std::optional<Drone>& player) {
+    Vec<2> c;
+    if (s.mission.type == Mission::Chase && player) {
+        c = City::intersection_center(
+            City::nearest_intersection_block({player->position[0], player->position[1]}));
+    } else if (s.mission.objectives.empty()) {
+        c = City::intersection_center(City::nearest_intersection_block({0.0f, 0.0f}));
+    } else {
+        c = s.mission.objectives[std::max(s.next_objective, 1u) - 1].center;
+    }
     return {c[0], c[1], player_spawn_alt};
 }
 
@@ -108,7 +115,16 @@ std::vector<Mission> Mission::all() {
         race.objectives.push_back({City::intersection_center(p), float(City::cell_size)});
     }
 
-    return {defense, sandbox, race};
+    Mission chase;
+    chase.type = Mission::Chase;
+    chase.name = "chase";
+    chase.enemy_spawn_radius = city_blocks(1);
+    chase.enemy_spawn_interval = 0.0f;
+    chase.max_enemies = 1;
+    chase.starting_lives = 3;
+    chase.time_limit = 60.0f;
+
+    return {defense, sandbox, race, chase};
 }
 
 struct GameManager::State {
@@ -124,7 +140,8 @@ void GameManager::update(GameState& s) {
     // Ensure a player exists (initial spawn / after a dead player is cleaned up).
     bool has_player = std::any_of(s.drones.begin(), s.drones.end(),
                                   [](auto& d) { return d.kind == Drone::Kind::Player; });
-    if (!has_player) spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s));
+    if (!has_player)
+        spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s, std::nullopt));
 
     // Player respawn
     if (player_drone(s).status == Drone::Status::Alive) {
@@ -134,7 +151,8 @@ void GameManager::update(GameState& s) {
             state->player_respawn_tick = s.tick + uint64(respawn_delay / Physics::dt);
         if (s.tick >= state->player_respawn_tick) {
             state->player_respawn_tick = 0;
-            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s));
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Player,
+                        player_spawn(s, player_drone(s)));
         }
     }
     auto& player = player_drone(s);
@@ -146,6 +164,13 @@ void GameManager::update(GameState& s) {
         if (s.mission.type == Mission::Sandbox) {
             Vec<2> rel = {d.position[0] - player.position[0], d.position[1] - player.position[1]};
             return length(rel) > sandbox_kill_radius;
+        }
+        if (s.mission.type == Mission::Chase) {
+            Vec<2> rel = {d.position[0] - player.position[0], d.position[1] - player.position[1]};
+            if (length(rel) > chase_escape_radius) {
+                if (s.lives > 0) --s.lives;
+                return true;
+            }
         }
         return false;
     });
@@ -203,6 +228,9 @@ void game_loop(Window& window, const Mission& mission) {
     GameState state{};
     state.mission = mission;
     state.lives = state.mission.starting_lives;
+    if (state.mission.type == Mission::Chase) {
+        state.timer = uint64(state.mission.time_limit / Physics::dt);
+    }
     GameManager game_manager;
     game_manager.update(state);
     AI ai;
