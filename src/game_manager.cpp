@@ -131,6 +131,9 @@ struct GameManager::State {
     uint next_drone_id = 0;
     uint64 player_respawn_tick = 0;
     uint64 next_enemy_spawn_tick = 0;
+    uint64 race_start_tick = 0;
+    uint64 chase_end_tick = 0;
+    bool player_was_alive = true;
 };
 
 GameManager::GameManager() : state(std::make_unique<State>()) {}
@@ -142,20 +145,66 @@ void GameManager::update(GameState& s) {
                                   [](auto& d) { return d.kind == Drone::Kind::Player; });
     if (!has_player)
         spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s, std::nullopt));
+    auto& player = player_drone(s);
+
+    // Mission updates
+    if (s.mission.type == Mission::Defense) {
+        for (auto& d : s.drones) {
+            if (d.kind == Drone::Kind::Enemy && d.status == Drone::Status::Alive) {
+                for (const auto& o : s.mission.objectives) {
+                    if (length(Vec<2>{d.position[0], d.position[1]} - o.center) <= o.radius) {
+                        d.status = Drone::Status::Detonated;
+                        if (s.lives > 0) --s.lives;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    if (s.mission.type == Mission::Race) {
+        auto finished = s.next_objective >= s.mission.objectives.size();
+        if ((player.status == Drone::Status::Alive) && !finished) {
+            Vec<2> p_xy = {player.position[0], player.position[1]};
+            if (!s.timer) {
+                if (length(p_xy - s.mission.objectives[0].center) >
+                    s.mission.objectives[0].radius) {
+                    state->race_start_tick = s.tick;
+                    s.timer = 0;
+                    s.next_objective = 1;
+                }
+            } else {
+                if (length(p_xy - s.mission.objectives[s.next_objective].center) <=
+                    s.mission.objectives[s.next_objective].radius) {
+                    ++s.next_objective;
+                }
+            }
+        }
+        if (s.timer && !finished) {
+            s.timer = s.tick - state->race_start_tick;
+        }
+    }
+    if (s.mission.type == Mission::Chase) {
+        if (state->chase_end_tick == 0) {
+            state->chase_end_tick = s.tick + uint64(s.mission.time_limit / Physics::dt);
+        }
+        s.timer = (s.tick < state->chase_end_tick) ? (state->chase_end_tick - s.tick) : 0;
+        if (player.status == Drone::Status::Detonated && state->player_was_alive) {
+            ++s.kill_count;
+        }
+    }
+    state->player_was_alive = (player.status == Drone::Status::Alive);
 
     // Player respawn
-    if (player_drone(s).status == Drone::Status::Alive) {
+    if (player.status == Drone::Status::Alive) {
         state->player_respawn_tick = 0;
     } else {
         if (state->player_respawn_tick == 0)
             state->player_respawn_tick = s.tick + uint64(respawn_delay / Physics::dt);
         if (s.tick >= state->player_respawn_tick) {
             state->player_respawn_tick = 0;
-            spawn_drone(state->next_drone_id, s, Drone::Kind::Player,
-                        player_spawn(s, player_drone(s)));
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s, player));
         }
     }
-    auto& player = player_drone(s);
 
     // Enemy cleanup: dead drones, and (sandbox) drones strayed beyond the kill radius.
     std::erase_if(s.drones, [&](const Drone& d) {
@@ -176,9 +225,7 @@ void GameManager::update(GameState& s) {
     });
 
     // Enemy spawn
-    if (s.mission.max_enemies == 0) {
-        // pass
-    } else if (state->next_enemy_spawn_tick == 0) {
+    if (state->next_enemy_spawn_tick == 0) {
         state->next_enemy_spawn_tick =
             s.tick + uint64(s.mission.enemy_spawn_interval / Physics::dt);
     } else if (s.tick >= state->next_enemy_spawn_tick) {
@@ -228,9 +275,6 @@ void game_loop(Window& window, const Mission& mission) {
     GameState state{};
     state.mission = mission;
     state.lives = state.mission.starting_lives;
-    if (state.mission.type == Mission::Chase) {
-        state.timer = uint64(state.mission.time_limit / Physics::dt);
-    }
     GameManager game_manager;
     game_manager.update(state);
     AI ai;
