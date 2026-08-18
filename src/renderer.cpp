@@ -313,6 +313,8 @@ struct Mesh {
 
 // Bundles a static quad + per-instance data (pos, glyph) for instanced text rendering.
 struct TextBatch {
+    static constexpr float base_font_width_ratio = 20.0f / 1080.0f;
+
     GlTexture tex;
     Font font;
     std::array<int, 256> glyph_map{};
@@ -325,6 +327,15 @@ struct TextBatch {
     Uniform u_scale;
     Uniform u_font_size;
     Uniform u_grid_dims;
+
+    Vec<2> base_font_size() const {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float min_dim = std::min(float(vp[2]), float(vp[3]));
+        const float w = min_dim * base_font_width_ratio;
+        const float h = w * (float(font.height) / float(font.width));
+        return {w, h};
+    }
 
     TextBatch() {
         font = Font::load();
@@ -348,8 +359,8 @@ struct TextBatch {
                         data[y * font.width + x];
         }
         glBindTexture(GL_TEXTURE_2D, tex.id);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, sheet_w, sheet_h, 0, GL_RED, GL_UNSIGNED_BYTE,
@@ -403,9 +414,10 @@ void main() {
               float top_y,
               float scale = 1.0f,
               const Vec<3>& color = {1.0f, 1.0f, 1.0f}) {
+        const auto font_size = base_font_size();
         std::vector<float> inst_pos;
         std::vector<float> inst_glyph;
-        const float advance = font.width * scale;
+        const float advance = font_size[0] * scale;
 
         for (size_t ti = 0; text[ti] != '\0'; ++ti) {
             const int i = glyph_map[static_cast<unsigned char>(text[ti])];
@@ -430,7 +442,7 @@ void main() {
         u_mvp.set(mat_ortho(0.0f, float(vp[2]), 0.0f, float(vp[3])));
         u_color.set(color);
         u_scale.set(scale);
-        u_font_size.set(Vec<2>{float(font.width), float(font.height)});
+        u_font_size.set(font_size);
         u_grid_dims.set(Vec<2>{float(glyph_cols), float(glyph_rows)});
 
         glDisable(GL_DEPTH_TEST);
@@ -797,11 +809,12 @@ void main(){
     void draw(const GameState& s, TextBatch& text) {
         const Drone& d = player_drone(s);
         const uint attitude_size = 140;
+        const uint pad = 16;
 
         // Draw the attitude indicator as a circle in the lower-left
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
-        glViewport(16, 16, attitude_size, attitude_size);
+        glViewport(pad, pad, attitude_size, attitude_size);
         glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
         glEnable(GL_BLEND);
@@ -824,15 +837,16 @@ void main(){
 
         // Text readouts to the right of the attitude indicator
         char buf[64];
+        const auto font_size = text.base_font_size();
         const float text_x = 16.0f + attitude_size + 24.0f;
-        const float text_y0 = 24.0f;
-        const float scale = 1.1f;
-        const float line_h = text.font.height * scale * 1.5f;
+        const float text_y0 = pad;
+        const float scale = 1.0f;
+        const float line_h = font_size[1] * scale * 1.5f;
 
         int p_v = int(std::round(pitch * rad_to_deg / 5.0f)) * 5;
         int r_v = int(std::round(roll * rad_to_deg / 5.0f)) * 5;
         std::snprintf(buf, sizeof(buf), "P/R %+3d %+1d", p_v, r_v);
-        text.draw(buf, text_x, text_y0 + line_h * 1.0f, scale, {1.0f, 1.0f, 1.0f});
+        text.draw(buf, text_x, text_y0 + line_h * 0.0f, scale, {1.0f, 1.0f, 1.0f});
 
         int alt_v = int(std::round(d.position[2]));
         Vec<3> alt_col = {1.0f, 1.0f, 1.0f};
@@ -843,31 +857,31 @@ void main(){
         }
         int vs_v = int(std::round(d.velocity[2]));
         std::snprintf(buf, sizeof(buf), "ALT %3d %+1d", alt_v, vs_v);
-        text.draw(buf, text_x, text_y0 + line_h * 2.0f, scale, alt_col);
+        text.draw(buf, text_x, text_y0 + line_h * 1.0f, scale, alt_col);
 
         int spd_v = int(
             std::round(std::sqrt(d.velocity[0] * d.velocity[0] + d.velocity[1] * d.velocity[1])));
         std::snprintf(buf, sizeof(buf), "SPD %3d", spd_v);
-        text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, {1.0f, 1.0f, 1.0f});
+        text.draw(buf, text_x, text_y0 + line_h * 2.0f, scale, {1.0f, 1.0f, 1.0f});
 
         if (s.mission.starting_lives) {
             std::snprintf(buf, sizeof(buf), "LIVES %1d", s.lives);
             Vec<3> lives_col = (s.lives > 1) ? Vec<3>{0.2f, 0.9f, 0.4f} : Vec<3>{1.0f, 0.2f, 0.2f};
-            text.draw(buf, text_x, text_y0 + line_h * 4.0f, scale, lives_col);
+            text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, lives_col);
         }
 
         const float timer_scale = 1.8f;
-        const float timer_y = 24.0f;
+        const float timer_y = pad;
         if (s.mission.type == Mission::Race) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
             std::snprintf(buf, sizeof(buf), "%.1fs", sec);
-            const float timer_w = float(std::strlen(buf)) * text.font.width * timer_scale;
+            const float timer_w = float(std::strlen(buf)) * font_size[0] * timer_scale;
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
             text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
         } else if (s.mission.type == Mission::Chase) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
             std::snprintf(buf, sizeof(buf), "%.1fs  CAUGHT %u", sec, s.kill_count);
-            const float timer_w = float(std::strlen(buf)) * text.font.width * timer_scale;
+            const float timer_w = float(std::strlen(buf)) * font_size[0] * timer_scale;
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
             text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
         }
@@ -920,13 +934,14 @@ void main() {
         quad.draw();
         glEnable(GL_DEPTH_TEST);
 
-        constexpr float font_scale = 5.0f;
+        constexpr float font_scale = 4.0f;
         const auto& player = player_drone(s);
         const char* label =
             (player.status == Drone::Status::Detonated) ? "detonation" : "signal lost";
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
-        const float text_w = float(std::strlen(label)) * text.font.width * font_scale;
+        const auto font_size = text.base_font_size();
+        const float text_w = float(std::strlen(label)) * font_size[0] * font_scale;
         const float x = float(vp[2]) / 2.0f - text_w / 2.0f;
         const float y = float(vp[3]) / 2.0f;
         text.draw(label, x, y, font_scale, {1.0f, 0.2f, 0.2f});
@@ -952,11 +967,12 @@ struct FpsView {
         std::snprintf(label, sizeof(label), "%d FPS", int(fps));
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
-        const float scale = 1.5f;
+        const auto font_size = text.base_font_size();
+        const float scale = 1.0f;
         const float margin = 8.0f;
-        const float text_w = float(std::strlen(label)) * text.font.width * scale;
+        const float text_w = float(std::strlen(label)) * font_size[0] * scale;
         const float x = float(vp[2]) - margin - text_w;
-        const float top_y = float(vp[3]) - margin - text.font.height * scale;
+        const float top_y = float(vp[3]) - margin - font_size[1] * scale;
         text.draw(label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
     }
 };
