@@ -8,8 +8,9 @@ import subprocess
 import sys
 import time
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Generator
 
 
 class Fail(Exception):
@@ -18,6 +19,11 @@ class Fail(Exception):
     def __init__(self, code: int) -> None:
         super().__init__(code)
         self.code = code
+
+
+def fail(msg: str) -> None:
+    print(msg, file=sys.stderr)
+    raise Fail(1)
 
 
 def sh(*cmd: str) -> None:
@@ -151,29 +157,71 @@ def build(variant: str, targets: tuple[str, ...]) -> None:
         print(f"  {game.stat().st_size / (1 << 20):.3f} MB  {game.relative_to(ROOT)}")
 
 
+@contextmanager
+def _gpu_top(path: Path | None) -> Generator[None, None, None]:
+    if path is None:
+        yield
+    else:
+        raw_path = path.with_suffix(path.suffix + ".raw")
+        gpu_proc = subprocess.Popen(
+            ["intel_gpu_top", "-J", "-s", "250", "-o", str(raw_path)]
+        )
+        try:
+            yield
+        finally:
+            gpu_proc.terminate()
+            gpu_proc.wait()
+            with path.open("w") as f:
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(ROOT / "tools" / "intel_gpu_top_to_jsonl.py"),
+                        str(raw_path),
+                    ],
+                    stdout=f,
+                )
+            raw_path.unlink(missing_ok=True)
+
+
 @cli("program_args", nargs="*", help="program to run")
 @cli("--reload", action="store_true", help="rebuild and restart on change")
-@cli("--with", dest="with_", choices=("perf", "gdb"), help="run under perf or gdb")
+@cli(
+    "--with",
+    dest="with_",
+    action="append",
+    choices=("perf", "gdb", "gpu"),
+    help="run under perf/gdb, and/or capture GPU data (repeatable)",
+)
 def run(
-    variant: str, program_args: tuple[str, ...], reload: bool, with_: str | None
+    variant: str, program_args: tuple[str, ...], reload: bool, with_: list[str] | None
 ) -> None:
     """run the command (default: game)"""
+
     program_args = program_args or ("game",)
     program, *args = program_args
-    exe = ROOT / "build" / variant / program
+    variant_dir = ROOT / "build" / variant
+    exe = variant_dir / program
+    tools = set(with_ or ())
+    perf_data = variant_dir / "perf.data"
+
+    if reload and "gpu" in tools:
+        fail("Cannot run --with gpu and --reload, which are mutually exclusive")
+    if "perf" in tools and "gdb" in tools:
+        fail("Cannot run --with perf and --with gdb, which are mutually exclusive")
 
     def cmd() -> list[str]:
-        if with_ == "gdb":
+        if "gdb" in tools:
             return ["gdb", "-ex", "run", "--args", str(exe), *args]
-        if with_ == "perf":
-            return ["perf", "record", "-g", "--", str(exe), *args]
+        if "perf" in tools:
+            return ["perf", "record", "-g", "-o", str(perf_data), "--", str(exe), *args]
         return [str(exe), *args]
 
     if not reload:
         build(variant, (program,))
-        sh(*cmd())
-        if with_ == "perf":
-            sh("perf", "report")
+        with _gpu_top(variant_dir / "gpu.jsonl" if "gpu" in tools else None):
+            sh(*cmd())
+        if "perf" in tools:
+            sh("perf", "report", "-i", str(perf_data))
         return
 
     def get_src_mtime() -> float:
