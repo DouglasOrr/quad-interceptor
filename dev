@@ -57,6 +57,7 @@ LINKFLAGS = "-fcolor-diagnostics -Wl,--gc-sections -Wl,-no-undefined"
 LIBS = sho("pkg-config --libs sdl2") + " -lGL"
 CXXFLAGS_VARIANT = {
     "debug": "-O0 -g -DDEBUG",
+    "profile": "-Os -g -fno-omit-frame-pointer -DNDEBUG",
     "release": "-Os -DNDEBUG",
 }
 
@@ -152,15 +153,27 @@ def build(variant: str, targets: tuple[str, ...]) -> None:
 
 @cli("program_args", nargs="*", help="program to run")
 @cli("--reload", action="store_true", help="rebuild and restart on change")
-def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
+@cli("--with", dest="with_", choices=("perf", "gdb"), help="run under perf or gdb")
+def run(
+    variant: str, program_args: tuple[str, ...], reload: bool, with_: str | None
+) -> None:
     """run the command (default: game)"""
     program_args = program_args or ("game",)
     program, *args = program_args
     exe = ROOT / "build" / variant / program
 
+    def cmd() -> list[str]:
+        if with_ == "gdb":
+            return ["gdb", "-ex", "run", "--args", str(exe), *args]
+        if with_ == "perf":
+            return ["perf", "record", "-g", "--", str(exe), *args]
+        return [str(exe), *args]
+
     if not reload:
         build(variant, (program,))
-        sh(str(exe), *args)
+        sh(*cmd())
+        if with_ == "perf":
+            sh("perf", "report")
         return
 
     def get_src_mtime() -> float:
@@ -187,7 +200,7 @@ def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
             pass
         last_exe_hash = get_exe_hash()
         if last_exe_hash is not None:
-            proc = subprocess.Popen([str(exe), *args])
+            proc = subprocess.Popen(cmd())
 
         while proc is None or proc.poll() is None:
             time.sleep(0.1)
@@ -210,7 +223,7 @@ def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
                 if proc is not None and proc.poll() is None:
                     proc.terminate()
                     proc.wait()
-                proc = subprocess.Popen([str(exe), *args])
+                proc = subprocess.Popen(cmd())
             else:
                 print(f"[{ts}] rebuilt (unchanged)")
     except KeyboardInterrupt:
@@ -225,7 +238,7 @@ def run(variant: str, program_args: tuple[str, ...], reload: bool) -> None:
 def ci(variant: str) -> None:
     """run continuous integration checks"""
     build(variant, targets=())
-    run(variant, program_args=("test",), reload=False)
+    run(variant, program_args=("test",), reload=False, with_=None)
 
 
 @cli()
@@ -250,13 +263,14 @@ def _main() -> None:
         "-v",
         "--variant",
         action="append",
-        choices=["debug", "release"],
+        choices=["debug", "profile", "release"],
     )
     parser.set_defaults(
         action=lambda variant: run(
             variant=variant,
             program_args=(),
             reload=True,
+            with_=None,
         )
     )
 

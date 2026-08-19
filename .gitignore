@@ -2,6 +2,7 @@
 .local
 .ninja_deps
 .ninja_log
+perf.data*
 __pycache__
 .venv
 .vscode
