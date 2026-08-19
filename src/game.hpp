@@ -135,7 +135,7 @@ private:
     std::unique_ptr<State> state;
 };
 
-void game_loop(Window& window, const Mission& mission);
+void game_loop(Window& window, const Mission& mission, bool player_ai, float timeout);
 
 struct Font {
     struct Glyph {
@@ -162,7 +162,7 @@ struct AI {
     AI();
     ~AI();
 
-    void update(GameState& state);
+    void update(GameState& state, bool control_player);
 
 private:
     struct State;

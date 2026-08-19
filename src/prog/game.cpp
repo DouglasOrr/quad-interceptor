@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <string_view>
@@ -6,9 +7,12 @@
 #include "platform.hpp"
 
 int main(int argc, char** argv) {
+    // Defaults
     const auto missions = Mission::all();
     auto mission = missions.begin();
     WindowMode window_mode = WindowMode::Windowed;
+    bool player_ai = false;
+    float timeout = 0.0f;
 
     for (int i = 1; i < argc; ++i) {
         // Parse
@@ -20,12 +24,13 @@ int main(int argc, char** argv) {
 
         // Process
         if (key == "mission") {
-            auto mission = std::find_if(missions.begin(), missions.end(),
-                                        [value](auto& m) { return m.name == value; });
-            if (mission == missions.end()) {
+            auto found = std::find_if(missions.begin(), missions.end(),
+                                      [value](auto& m) { return m.name == value; });
+            if (found == missions.end()) {
                 std::cerr << "Error! Unknown mission=" << value << std::endl;
                 return 1;
             }
+            mission = found;
         } else if (key == "window") {
             if (value == "full") {
                 window_mode = WindowMode::Fullscreen;
@@ -35,6 +40,17 @@ int main(int argc, char** argv) {
                 std::cerr << "Error! Unknown window=" << value << std::endl;
                 return 1;
             }
+        } else if (key == "player") {
+            if (value == "ai") {
+                player_ai = true;
+            } else if (value == "user") {
+                player_ai = false;
+            } else {
+                std::cerr << "Error! Unknown player=" << value << std::endl;
+                return 1;
+            }
+        } else if (key == "timeout") {
+            timeout = std::atof(std::string(value).c_str());
         } else {
             std::cerr << "Error! Unknown arg " << arg << std::endl;
             return 1;
@@ -42,5 +58,5 @@ int main(int argc, char** argv) {
     }
 
     Window window("Small Game", 1920, 1080, window_mode);
-    game_loop(window, *mission);
+    game_loop(window, *mission, player_ai, timeout);
 }

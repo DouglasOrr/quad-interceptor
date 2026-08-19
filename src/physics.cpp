@@ -355,6 +355,34 @@ Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
     float safe_alt = choose_safe_altitude(s.city, pos, target);
     return {target[0], target[1], safe_alt};
 }
+
+void steer_drone(const GameState& s, DroneAI& a, Drone& d) {
+    Vec<3> wp = choose_next_waypoint(s, a, d.position);
+
+    // Lift - hover at the waypoint altitude
+    d.control_m[2] = a.lift(wp[2], d.position[2], Physics::dt);
+
+    // Yaw - face the waypoint
+    Vec<2> desired = normalise(Vec<2>{wp[0] - d.position[0], wp[1] - d.position[1]});
+    Vec<3> fwd = rotate(d.orientation, {1.0f, 0.0f, 0.0f});
+    Vec<2> fwd_xy = normalise(Vec<2>{fwd[0], fwd[1]});
+    float yaw_err = std::atan2(fwd_xy[0] * desired[1] - fwd_xy[1] * desired[0],
+                               fwd_xy[0] * desired[0] + fwd_xy[1] * desired[1]);
+    d.control_m[3] = a.yaw(0.0f, yaw_err, Physics::dt);
+
+    // Pitch - aim for a target nose-down angle (when facing the waypoint)
+    float target_pitch =
+        std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle;
+    float pitch_angle = -std::asin(std::clamp(fwd[2], -1.0f, 1.0f));
+    d.control_m[1] = a.pitch(target_pitch, pitch_angle, Physics::dt);
+
+    // Lateral Vel > Roll - aim for zero lateral motion.
+    float lat_vel = -d.velocity[0] * fwd_xy[1] + d.velocity[1] * fwd_xy[0];
+    float target_roll = -a.lateral(0.0f, lat_vel, Physics::dt);
+    Vec<3> right = rotate(d.orientation, {0.0f, 1.0f, 0.0f});
+    float roll_angle = std::asin(std::clamp(right[2], -1.0f, 1.0f));
+    d.control_m[0] = a.roll(target_roll, roll_angle, Physics::dt);
+}
 }  // namespace
 
 struct AI::State {
@@ -364,36 +392,13 @@ struct AI::State {
 AI::AI() : state(std::make_unique<State>()) {}
 AI::~AI() = default;
 
-void AI::update(GameState& s) {
+void AI::update(GameState& s, bool control_player) {
     sync_parallel(
         s.drones, state->drones, [](const Drone& d) { return DroneAI{.id = d.id}; },
         [&](Drone& d, DroneAI& a) {
-            if (d.kind != Drone::Kind::Enemy || d.status != Drone::Status::Alive) return;
-
-            Vec<3> wp = choose_next_waypoint(s, a, d.position);
-
-            // Lift - hover at the waypoint altitude
-            d.control_m[2] = a.lift(wp[2], d.position[2], Physics::dt);
-
-            // Yaw - face the waypoint
-            Vec<2> desired = normalise(Vec<2>{wp[0] - d.position[0], wp[1] - d.position[1]});
-            Vec<3> fwd = rotate(d.orientation, {1.0f, 0.0f, 0.0f});
-            Vec<2> fwd_xy = normalise(Vec<2>{fwd[0], fwd[1]});
-            float yaw_err = std::atan2(fwd_xy[0] * desired[1] - fwd_xy[1] * desired[0],
-                                       fwd_xy[0] * desired[0] + fwd_xy[1] * desired[1]);
-            d.control_m[3] = a.yaw(0.0f, yaw_err, Physics::dt);
-
-            // Pitch - aim for a target nose-down angle (when facing the waypoint)
-            float target_pitch =
-                std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle;
-            float pitch_angle = -std::asin(std::clamp(fwd[2], -1.0f, 1.0f));
-            d.control_m[1] = a.pitch(target_pitch, pitch_angle, Physics::dt);
-
-            // Lateral Vel > Roll - aim for zero lateral motion.
-            float lat_vel = -d.velocity[0] * fwd_xy[1] + d.velocity[1] * fwd_xy[0];
-            float target_roll = -a.lateral(0.0f, lat_vel, Physics::dt);
-            Vec<3> right = rotate(d.orientation, {0.0f, 1.0f, 0.0f});
-            float roll_angle = std::asin(std::clamp(right[2], -1.0f, 1.0f));
-            d.control_m[0] = a.roll(target_roll, roll_angle, Physics::dt);
+            if (d.status != Drone::Status::Alive) return;
+            if (d.kind == Drone::Kind::Enemy || (control_player && d.kind == Drone::Kind::Player)) {
+                steer_drone(s, a, d);
+            }
         });
 }

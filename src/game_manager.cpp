@@ -271,7 +271,7 @@ void copy_control(const Window& w, Vec<4>& c) {
 }
 }  // namespace
 
-void game_loop(Window& window, const Mission& mission) {
+void game_loop(Window& window, const Mission& mission, bool player_ai, float timeout) {
     GameState state{};
     state.mission = mission;
     state.lives = state.mission.starting_lives;
@@ -287,12 +287,13 @@ void game_loop(Window& window, const Mission& mission) {
     float physics_time = 0.0f;
     while (window.frame()) {
         const float dt = stopwatch.lap();
+        if (timeout > 0 && state.tick * Physics::dt >= timeout) break;
         if (window.pressed(Key::hash)) {
-            game_loop(window, mission);
+            game_loop(window, mission, player_ai, timeout);
             return;
         }
-        copy_control(window, player_drone(state).control_m);
-        ai.update(state);
+        if (!player_ai) copy_control(window, player_drone(state).control_m);
+        ai.update(state, player_ai);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
             Physics::tick(state);
