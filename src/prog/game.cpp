@@ -12,6 +12,7 @@ int main(int argc, char** argv) {
     auto mission = missions.begin();
     WindowMode window_mode = WindowMode::Windowed;
     bool player_ai = false;
+    std::string profile = "";
     float timeout = 0.0f;
 
     for (int i = 1; i < argc; ++i) {
@@ -51,12 +52,21 @@ int main(int argc, char** argv) {
             }
         } else if (key == "timeout") {
             timeout = std::atof(std::string(value).c_str());
+        } else if (key == "profile") {
+            if (value == "true") {
+                profile = std::string(argv[0]) + ".profile";
+            } else if (value == "false") {
+                profile = "";
+            } else {
+                std::cerr << "Error! Unknown profile=" << value << std::endl;
+                return 1;
+            }
         } else {
             std::cerr << "Error! Unknown arg " << arg << std::endl;
             return 1;
         }
     }
 
-    Window window("Small Game", 1920, 1080, window_mode);
+    Window window("Small Game", 1920, 1080, window_mode, profile);
     game_loop(window, *mission, player_ai, timeout);
 }

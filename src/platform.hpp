@@ -75,7 +75,11 @@ struct Window {
     struct State;
     inline static constexpr int audio_sample_rate = 44100;
 
-    Window(const char* title, int width, int height, WindowMode mode);
+    Window(const std::string& title,
+           int width,
+           int height,
+           WindowMode mode,
+           const std::string& profile_path);
     ~Window();
 
     // Swap buffers and process input events, returns false if the window should close

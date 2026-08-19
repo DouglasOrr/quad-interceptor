@@ -1,7 +1,12 @@
 #include <SDL.h>
 #include <array>
+#include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <stdexcept>
+#include <string>
+#include <vector>
 
 #include "platform.hpp"
 
@@ -17,13 +22,26 @@ struct Window::State {
     bool started = false;
     std::array<bool, static_cast<size_t>(Key::count)> held_keys{};
     std::array<bool, static_cast<size_t>(Key::count)> prev_held_keys{};
+
+    // Profiling
+    std::string profile_path;
+    std::vector<float> profile_data;
+    uint64_t last_swap_ticks = 0;
+    std::atomic<uint64_t> audio_sample_ticks{0};
+    std::atomic<uint32_t> audio_samples{0};
 };
 
 namespace {
 void sdl_audio_callback(void* userdata, Uint8* stream, int len) {
     auto* state = static_cast<Window::State*>(userdata);
     if (state->audio_callback) {
+        const uint64_t t0 = SDL_GetPerformanceCounter();
         state->audio_callback(reinterpret_cast<int16_t*>(stream), len / (2 * sizeof(int16_t)));
+        const uint64_t t1 = SDL_GetPerformanceCounter();
+        if (!state->profile_path.empty()) {
+            state->audio_sample_ticks.fetch_add(t1 - t0, std::memory_order_relaxed);
+            state->audio_samples.fetch_add(len / (2 * sizeof(int16_t)), std::memory_order_relaxed);
+        }
     } else {
         std::memset(stream, 0, len);
     }
@@ -40,8 +58,13 @@ static constexpr SDL_Scancode key_scancodes[] = {
 };
 static_assert(std::size(key_scancodes) == static_cast<size_t>(Key::count));
 
-Window::Window(const char* title, int width, int height, WindowMode mode)
+Window::Window(const std::string& title,
+               int width,
+               int height,
+               WindowMode mode,
+               const std::string& profile_path)
     : state(std::make_unique<State>()) {
+    state->profile_path = profile_path;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
@@ -63,8 +86,8 @@ Window::Window(const char* title, int width, int height, WindowMode mode)
         }
         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
-    state->window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
-                                     height, flags);
+    state->window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                                     width, height, flags);
     if (!state->window) {
         std::string err = std::string("Failed to create window: ") + SDL_GetError();
         SDL_Quit();
@@ -85,7 +108,8 @@ Window::Window(const char* title, int width, int height, WindowMode mode)
     int w, h;
     SDL_GL_GetDrawableSize(state->window, &w, &h);
     glViewport(0, 0, w, h);
-    SDL_GL_SetSwapInterval(1);
+    // Disable vsync when profiling
+    SDL_GL_SetSwapInterval(profile_path.empty() ? 1 : 0);
 
     // Open audio device
     SDL_AudioSpec desired, obtained;
@@ -108,13 +132,43 @@ Window::~Window() {
     if (state->audio_dev != 0) {
         SDL_CloseAudioDevice(state->audio_dev);
     }
+    if (!state->profile_data.empty()) {
+        std::ofstream out(state->profile_path, std::ios::binary);
+        if (out) {
+            out.write("GPRF", 4);
+            const uint32_t count = static_cast<uint32_t>(state->profile_data.size() / 4);
+            out.write(reinterpret_cast<const char*>(&count), sizeof(count));
+            out.write(reinterpret_cast<const char*>(state->profile_data.data()),
+                      static_cast<std::streamsize>(state->profile_data.size() * sizeof(float)));
+        }
+    }
     if (state->gl_context) SDL_GL_DeleteContext(state->gl_context);
     if (state->window) SDL_DestroyWindow(state->window);
     SDL_Quit();
 }
 
 bool Window::frame() {
-    if (state->started) SDL_GL_SwapWindow(state->window);
+    if (state->started) {
+        const uint64_t swap_start = SDL_GetPerformanceCounter();
+        SDL_GL_SwapWindow(state->window);
+        const uint64_t swap_end = SDL_GetPerformanceCounter();
+        if (!state->profile_path.empty()) {
+            const uint64_t freq = SDL_GetPerformanceFrequency();
+            auto t_swap = static_cast<float>(swap_end - swap_start) / static_cast<float>(freq);
+            auto t_frame = (state->last_swap_ticks == 0)
+                               ? 0.0f
+                               : static_cast<float>(swap_start - state->last_swap_ticks) /
+                                     static_cast<float>(freq);
+            auto t_audio = static_cast<float>(state->audio_sample_ticks.exchange(0)) /
+                           static_cast<float>(freq);
+            auto n_audio_samples = static_cast<float>(state->audio_samples.exchange(0));
+            state->last_swap_ticks = swap_end;
+            state->profile_data.push_back(t_swap);
+            state->profile_data.push_back(t_frame);
+            state->profile_data.push_back(t_audio);
+            state->profile_data.push_back(n_audio_samples);
+        }
+    }
     state->started = true;
 
     SDL_Event event;
