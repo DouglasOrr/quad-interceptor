@@ -36,7 +36,7 @@ Font Font::load() {
 
 namespace {
 constexpr float city_blocks(float n) {
-    return n * float(City::block_size) * float(City::cell_size);
+    return n * float(City::block_size) * City::cell_size;
 }
 
 constexpr float respawn_delay = 2.0f;
@@ -112,7 +112,7 @@ std::vector<Mission> Mission::all() {
     const std::vector<City::Pos> waypoints = {{0, 0},  {0, 2},   {2, 2},  {2, 0}, {2, -2},
                                               {0, -2}, {-2, -2}, {-2, 0}, {0, 0}};
     for (auto p : waypoints) {
-        race.objectives.push_back({City::intersection_center(p), float(City::cell_size)});
+        race.objectives.push_back({City::intersection_center(p), City::cell_size});
     }
 
     Mission chase;

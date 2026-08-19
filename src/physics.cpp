@@ -24,6 +24,9 @@ constexpr float lock_on_reset_rate = 1 / 30.0f;
 
 // City
 constexpr Vec<2> city_building_height_range = {10.0f, 100.0f};
+constexpr Vec<2> city_skywalk_height_range = {10.0f, 80.0f};
+constexpr float city_skywalk_prob = 0.5f;
+constexpr float city_skywalk_clearance = 5.0f;
 
 }  // namespace
 
@@ -45,53 +48,98 @@ Vec<2> City::cell_center(Pos p) {
     return {(p[0] + 0.5f) * cell_size, (p[1] + 0.5f) * cell_size};
 }
 
+City::Pos City::block_index(Pos p) {
+    return {floordiv(p[0], int64(block_size)), floordiv(p[1], int64(block_size))};
+}
+
+City::Pos City::block_offset(Pos p) {
+    return {floormod(p[0], int64(block_size)), floormod(p[1], int64(block_size))};
+}
+
 City::Pos City::nearest_intersection_block(Vec<2> v) {
-    constexpr float block_w = float(block_size * cell_size);
-    constexpr float hw = 0.5f * float(street_size * cell_size);
+    constexpr float block_w = float(block_size) * cell_size;
+    constexpr float hw = 0.5f * float(street_size) * cell_size;
     return {std::llround((v[0] - hw) / block_w), std::llround((v[1] - hw) / block_w)};
 }
 
 Vec<2> City::intersection_center(Pos block) {
-    constexpr float block_w = float(block_size * cell_size);
-    constexpr float hw = 0.5f * float(street_size * cell_size);
+    constexpr float block_w = float(block_size) * cell_size;
+    constexpr float hw = 0.5f * float(street_size) * cell_size;
     return {float(block[0]) * block_w + hw, float(block[1]) * block_w + hw};
 }
 
 Cell City::operator()(Pos p) const {
     uint64 h = hash(seed, p[0], p[1]);
-    int64 ox = p[0] - floordiv(p[0], int64(City::block_size)) * int64(City::block_size);
-    int64 oy = p[1] - floordiv(p[1], int64(City::block_size)) * int64(City::block_size);
+    auto [bx, by] = block_index(p);
+    auto [ox, oy] = block_offset(p);
 
-    float height = 0.0f;  // street
+    constexpr uint64 tag_x = 0x534b595f58ull;
+    constexpr uint64 tag_y = 0x534b595f59ull;
+
+    auto sample_skywalk = [&](uint64 tag, int64 a, int64 b) {
+        uint64 h2 = hash(seed, tag, a, b);
+        float prob = (h2 & 0xffff) * (1.0f / float(1 << 16));
+        float u = ((h2 >> 16) & 0xffff) * (1.0f / float(1 << 16));
+        if (prob >= city_skywalk_prob) return 0.0f;
+        return city_skywalk_height_range[0] +
+               u * (city_skywalk_height_range[1] - city_skywalk_height_range[0]);
+    };
+
+    float height = 0.0f;
+    float skywalk_height = 0.0f;
+
     if (City::street_size <= ox && City::street_size <= oy) {
-        float u = (h & 0xffffff) * (1.0f / float(1 << 24));
+        float u = (h & 0xffff) * (1.0f / float(1 << 16));
         height = city_building_height_range[0] +
                  u * (city_building_height_range[1] - city_building_height_range[0]);
+
+        auto apply_skywalk = [&](float sw) {
+            if (sw > 0.0f) {
+                height = std::max(height, sw + City::skywalk_thickness + city_skywalk_clearance);
+            }
+        };
+        if (ox == City::street_size) apply_skywalk(sample_skywalk(tag_x, bx, p[1]));
+        if (ox == int64(City::block_size - 1)) apply_skywalk(sample_skywalk(tag_x, bx + 1, p[1]));
+        if (oy == City::street_size) apply_skywalk(sample_skywalk(tag_y, p[0], by));
+        if (oy == int64(City::block_size - 1)) apply_skywalk(sample_skywalk(tag_y, p[0], by + 1));
+    } else {
+        if (ox < City::street_size && oy >= City::street_size) {
+            skywalk_height = sample_skywalk(tag_x, bx, p[1]);
+            h = hash(seed, tag_x, bx, p[1]);
+        } else if (oy < City::street_size && ox >= City::street_size) {
+            skywalk_height = sample_skywalk(tag_y, p[0], by);
+            h = hash(seed, tag_y, p[0], by);
+        }
     }
-    return {height, h};
+    return {height, skywalk_height, h};
 }
 
 namespace {
-// Test if a sphere at p with radius r touches any building
+// Test if a sphere at p with radius r touches any building or skywalk
 bool hits_building(const City& city, Vec<3> p, float r) {
     // Find the subgrid of cells that overlap the sphere footprint
-    constexpr float cs = float(City::cell_size);
-    const int64 cx0 = floordiv(int64(std::floor(p[0] - r)), int64(cs));
-    const int64 cx1 = floordiv(int64(std::floor(p[0] + r)), int64(cs));
-    const int64 cy0 = floordiv(int64(std::floor(p[1] - r)), int64(cs));
-    const int64 cy1 = floordiv(int64(std::floor(p[1] + r)), int64(cs));
+    constexpr float cs = City::cell_size;
+    const int64 cx0 = int64(std::floor((p[0] - r) / cs));
+    const int64 cx1 = int64(std::floor((p[0] + r) / cs));
+    const int64 cy0 = int64(std::floor((p[1] - r) / cs));
+    const int64 cy1 = int64(std::floor((p[1] + r) / cs));
     for (int64 cy = cy0; cy <= cy1; ++cy) {
         for (int64 cx = cx0; cx <= cx1; ++cx) {
-            float h = city({cx, cy}).height;
-            if (h <= 0.0f) continue;
-            // Closest point on the building AABB to the sphere centre
-            Vec<3> q = {
-                std::clamp(p[0], float(cx) * cs, float(cx + 1) * cs),
-                std::clamp(p[1], float(cy) * cs, float(cy + 1) * cs),
-                std::clamp(p[2], 0.0f, h),
-            };
-            Vec<3> d = q - p;
-            if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2] < r * r) return true;
+            Cell c = city({cx, cy});
+            if (c.height > 0.0f) {
+                Vec<3> center = {(cx + 0.5f) * cs, (cy + 0.5f) * cs, 0.5f * c.height};
+                Vec<3> size = {cs, cs, c.height};
+                if (intersect_box_sphere(center, size, p, r)) return true;
+            }
+            if (c.skywalk_height > 0.0f) {
+                auto [ox, oy] = City::block_offset({cx, cy});
+                constexpr float T = City::skywalk_thickness;
+                Vec<3> center = {(cx + 0.5f) * cs, (cy + 0.5f) * cs, c.skywalk_height + 0.5f * T};
+                Vec<3> size = (ox < int64(City::street_size) && oy >= int64(City::street_size))
+                                  ? Vec<3>{cs, T, T}
+                                  : Vec<3>{T, cs, T};
+                if (intersect_box_sphere(center, size, p, r)) return true;
+            }
         }
     }
     return false;
@@ -192,7 +240,6 @@ void Physics::tick(GameState& state) {
 // AI
 
 namespace {
-constexpr float ai_hover_altitude = 20.0f;
 constexpr float ai_yaw_deadband = 45.0f * deg_to_rad;
 constexpr float ai_pitch_angle = 30.0f * deg_to_rad;
 constexpr float ai_max_roll_angle = 60.0f * deg_to_rad;
@@ -213,6 +260,54 @@ struct DroneAI {
     std::optional<City::Pos> current = {};
     std::optional<City::Pos> prev = {};
 };
+
+float choose_safe_altitude(const City& city, const Vec<3>& pos, Vec<2> target_pos) {
+    constexpr int n_lookahead = 4;
+    constexpr float margin = 5.0f;
+    constexpr float min_alt = 10.0f;
+    constexpr float max_alt = Drone::lock_on_level - margin;
+
+    float alt = std::clamp(pos[2], min_alt, max_alt);
+
+    // Find ranges that are disallowed by skywalks
+    struct Range {
+        float lo, hi;
+    };
+    std::vector<Range> ranges;
+    Vec<2> cur2 = {pos[0], pos[1]};
+    Vec<2> to_tgt = target_pos - cur2;
+    float dist = length(to_tgt);
+    Vec<2> dir = dist > 1e-3f ? normalise(to_tgt) : Vec<2>{0.0f, 0.0f};
+    for (int i = 0; i <= n_lookahead; ++i) {
+        float step = std::min(float(i) * City::cell_size, dist);
+        Cell c = city(City::nearest_cell(cur2 + step * dir));
+        if (c.skywalk_height > 0.0f) {
+            ranges.push_back(
+                {c.skywalk_height - margin, c.skywalk_height + City::skywalk_thickness + margin});
+        }
+    }
+    std::ranges::sort(ranges, [](const auto& a, const auto& b) { return a.lo < b.lo; });
+
+    // Merge overlaps
+    size_t n = 0;
+    for (const auto& r : ranges) {
+        if (n > 0 && r.lo <= ranges[n - 1].hi) {
+            ranges[n - 1].hi = std::max(ranges[n - 1].hi, r.hi);
+        } else {
+            ranges[n++] = r;
+        }
+    }
+    ranges.resize(n);
+
+    // If `alt` lies in a disallowed range, go up or down to the nearer boundary
+    for (const auto& r : ranges) {
+        if (alt >= r.lo && alt <= r.hi) {
+            bool prefer_lo = alt - r.lo < r.hi - alt || r.hi > max_alt;
+            return (prefer_lo && r.lo >= min_alt) ? r.lo : std::min(r.hi, max_alt);
+        }
+    }
+    return alt;
+}
 
 Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
     // Initialise current/prev to the closest street intersection if unset.
@@ -257,7 +352,8 @@ Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
         a.current = next;
     }
     auto target = City::intersection_center(*a.current);
-    return {target[0], target[1], ai_hover_altitude};
+    float safe_alt = choose_safe_altitude(s.city, pos, target);
+    return {target[0], target[1], safe_alt};
 }
 }  // namespace
 

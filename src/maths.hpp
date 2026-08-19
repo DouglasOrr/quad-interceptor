@@ -18,6 +18,10 @@ inline int64 floordiv(int64 a, int64 b) {
     return a >= 0 ? a / b : (a - (b - 1)) / b;
 }
 
+inline int64 floormod(int64 a, int64 b) {
+    return a - floordiv(a, b) * b;
+}
+
 inline uint64 hash_mix(uint64 x) {
     x ^= x >> 32;
     x *= 0xd6e8feb86659fd93ULL;
@@ -294,4 +298,18 @@ constexpr Mat<M, N> mul(const Mat<M, K>& a, const Mat<K, N>& b) {
             r[row, c] = s;
         }
     return r;
+}
+
+inline constexpr bool intersect_box_sphere(Vec<3> box_center,
+                                           Vec<3> box_size,
+                                           Vec<3> sphere_center,
+                                           float sphere_radius) {
+    Vec<3> half = 0.5f * box_size;
+    Vec<3> q = {
+        std::clamp(sphere_center[0], box_center[0] - half[0], box_center[0] + half[0]),
+        std::clamp(sphere_center[1], box_center[1] - half[1], box_center[1] + half[1]),
+        std::clamp(sphere_center[2], box_center[2] - half[2], box_center[2] + half[2]),
+    };
+    Vec<3> d = q - sphere_center;
+    return dot(d, d) < sphere_radius * sphere_radius;
 }

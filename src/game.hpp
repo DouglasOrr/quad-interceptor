@@ -70,18 +70,23 @@ struct Drone {
 };
 
 struct Cell {
-    float height;  // 0=street
+    float height;          // 0=street, >0=building
+    float skywalk_height;  // 0=no skywalk, >0=bottom altitude of skywalk
     uint64 hash;
 };
 
 struct City {
     using Pos = std::array<int64, 2>;
-    inline static constexpr uint cell_size = 15;
+    inline static constexpr float cell_size = 15.0f;
     inline static constexpr uint block_size = 10;  // cells per city block (street grid period)
     inline static constexpr uint street_size = 2;  // street width, in cells (each block edge)
+    inline static constexpr float skywalk_thickness = 5.0f;
 
     int64 seed;
     Cell operator()(Pos p) const;
+
+    static Pos block_index(Pos p);
+    static Pos block_offset(Pos p);
     static Pos nearest_cell(Vec<2> v);
     static Vec<2> cell_center(Pos p);
     static Pos nearest_intersection_block(Vec<2> v);

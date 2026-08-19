@@ -491,7 +491,7 @@ constexpr float fov_deg = 100.0f;
 constexpr int city_radius = 60;  // cells rendered around the player in each direction
 constexpr Vec<3> light_dir{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
 constexpr Vec<3> fog_color{0.15f, 0.15f, 0.2f};
-constexpr float fog_end = float(city_radius) * float(City::cell_size);
+constexpr float fog_end = float(city_radius) * City::cell_size;
 constexpr float fog_start = fog_end * 0.5f;
 constexpr int minimap_cells = 25;  // radar radius, in street cells
 constexpr int minimap_size = 300;  // square side, in pixels
@@ -618,7 +618,7 @@ void main(){
     }
 
     void draw(const GameState& s) {
-        const float R = float(City::cell_size) * minimap_cells;
+        const float R = City::cell_size * minimap_cells;
         const float px_to_world = 2.0f * R / float(minimap_size);  // 1px radius -> world scale
 
         const auto& player = player_drone(s);
@@ -654,7 +654,7 @@ void main(){
         // origin -- so a drone sitting on an intersection center maps to (0,0).
         grid_program.use();
         {
-            const float cell = float(City::cell_size);
+            const float cell = City::cell_size;
             const float block_w = float(City::block_size) * cell;
             const float band_half = 0.5f * float(City::street_size) * cell;
             std::vector<float> bands;  // (center, axis) per band
@@ -981,7 +981,6 @@ struct FpsView {
 struct CityView {
     GlProgram program;
     Uniform u_mvp;
-    Uniform u_cell_size;
     Uniform u_light_dir;
     Uniform u_cam_pos;
     Uniform u_fog_color;
@@ -1003,16 +1002,14 @@ struct CityView {
         const char* v_src = R"(
 #version 330 core
 layout(location=0) in vec3 pos;
-layout(location=1) in vec3 inst_world;   // x, y, height
-layout(location=2) in vec3 inst_color;
+layout(location=1) in vec3 inst_pos;
+layout(location=2) in vec3 inst_scale;
+layout(location=3) in vec3 inst_color;
 uniform mat4 u_mvp;
-uniform float u_cell_size;
 out vec3 v_world;
 out vec3 v_color;
 void main(){
-  vec3 scale = vec3(u_cell_size, u_cell_size, inst_world.z);
-  vec3 world = vec3(inst_world.x, inst_world.y, 0.0);
-  vec3 p = world + scale * (pos + 0.5);
+  vec3 p = inst_pos + inst_scale * (pos + 0.5);
   gl_Position = u_mvp * vec4(p, 1.0);
   v_world = p;
   v_color = inst_color;
@@ -1020,7 +1017,6 @@ void main(){
 )";
         program = GlProgram(v_src, PHONG_F_SRC);
         u_mvp = program.uniform("u_mvp");
-        u_cell_size = program.uniform("u_cell_size");
         u_light_dir = program.uniform("u_light_dir");
         u_cam_pos = program.uniform("u_cam_pos");
         u_fog_color = program.uniform("u_fog_color");
@@ -1034,6 +1030,7 @@ void main(){
         buildings.add({.data = CUBE, .bytes = sizeof(CUBE), .loc = 0, .comps = 3});
         buildings.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
         buildings.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+        buildings.add({.data = nullptr, .bytes = 0, .loc = 3, .comps = 3, .divisor = true});
 
         floor.mode = GL_TRIANGLES;
         floor.vertex_count = 6;
@@ -1041,6 +1038,7 @@ void main(){
         floor.add({.data = QUAD3, .bytes = sizeof(QUAD3), .loc = 0, .comps = 3});
         floor.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
         floor.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+        floor.add({.data = nullptr, .bytes = 0, .loc = 3, .comps = 3, .divisor = true});
     }
 
     void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye) {
@@ -1052,8 +1050,8 @@ void main(){
         if (ax != anchor_x || ay != anchor_y) {
             anchor_x = ax;
             anchor_y = ay;
-            std::vector<float> floor_world, floor_color;
-            std::vector<float> buildings_world, buildings_color;
+            std::vector<float> floor_pos, floor_scale, floor_color;
+            std::vector<float> buildings_pos, buildings_scale, buildings_color;
             for (int64 dy = -city_radius; dy <= city_radius; ++dy) {
                 for (int64 dx = -city_radius; dx <= city_radius; ++dx) {
                     Cell c = city({ax + dx, ay + dy});
@@ -1062,25 +1060,50 @@ void main(){
                     if (c.height > 0.0f) {
                         float k = float((c.hash >> 32) & 0xff) / 255.0f;
                         float shade = 0.2f + 0.2f * k;
-                        buildings_world.insert(buildings_world.end(), {wx, wy, c.height});
+                        buildings_pos.insert(buildings_pos.end(), {wx, wy, 0.0f});
+                        buildings_scale.insert(buildings_scale.end(), {cell, cell, c.height});
                         buildings_color.insert(buildings_color.end(), {shade, shade, shade});
                     } else {
-                        floor_world.insert(floor_world.end(), {wx, wy, 0.0f});
+                        floor_pos.insert(floor_pos.end(), {wx, wy, 0.0f});
+                        floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
                         floor_color.insert(floor_color.end(), {0.15f, 0.15f, 0.15f});
+                        if (c.skywalk_height > 0.0f) {
+                            float k = float((c.hash >> 32) & 0xff) / 255.0f;
+                            float shade = 0.25f + 0.2f * k;
+                            constexpr float T = City::skywalk_thickness;
+                            auto [ox, oy] = City::block_offset({ax + dx, ay + dy});
+                            float sx, sy, px, py;
+                            if (ox < int64(City::street_size) && oy >= int64(City::street_size)) {
+                                sx = cell;
+                                sy = T;
+                                px = wx;
+                                py = wy + 0.5f * (cell - T);
+                            } else {
+                                sx = T;
+                                sy = cell;
+                                px = wx + 0.5f * (cell - T);
+                                py = wy;
+                            }
+                            buildings_pos.insert(buildings_pos.end(), {px, py, c.skywalk_height});
+                            buildings_scale.insert(buildings_scale.end(), {sx, sy, T});
+                            buildings_color.insert(buildings_color.end(),
+                                                   {shade * 0.9f, shade * 1.0f, shade * 1.1f});
+                        }
                     }
                 }
             }
-            floor.instance_count = static_cast<GLsizei>(floor_world.size() / 3);
-            floor.buffers[1].upload(floor_world, GL_DYNAMIC_DRAW);
-            floor.buffers[2].upload(floor_color, GL_DYNAMIC_DRAW);
-            buildings.instance_count = static_cast<GLsizei>(buildings_world.size() / 3);
-            buildings.buffers[1].upload(buildings_world, GL_DYNAMIC_DRAW);
-            buildings.buffers[2].upload(buildings_color, GL_DYNAMIC_DRAW);
+            floor.instance_count = static_cast<GLsizei>(floor_pos.size() / 3);
+            floor.buffers[1].upload(floor_pos, GL_DYNAMIC_DRAW);
+            floor.buffers[2].upload(floor_scale, GL_DYNAMIC_DRAW);
+            floor.buffers[3].upload(floor_color, GL_DYNAMIC_DRAW);
+            buildings.instance_count = static_cast<GLsizei>(buildings_pos.size() / 3);
+            buildings.buffers[1].upload(buildings_pos, GL_DYNAMIC_DRAW);
+            buildings.buffers[2].upload(buildings_scale, GL_DYNAMIC_DRAW);
+            buildings.buffers[3].upload(buildings_color, GL_DYNAMIC_DRAW);
         }
         if (floor.instance_count > 0) {
             program.use();
             u_mvp.set(view_projection_mat);
-            u_cell_size.set(cell);
             floor_mat.use();
             u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
@@ -1091,7 +1114,6 @@ void main(){
         if (buildings.instance_count > 0) {
             program.use();
             u_mvp.set(view_projection_mat);
-            u_cell_size.set(cell);
             building_mat.use();
             u_light_dir.set(light_dir);
             u_cam_pos.set(eye);
