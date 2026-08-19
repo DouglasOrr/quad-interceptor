@@ -870,7 +870,7 @@ void main(){
             text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, lives_col);
         }
 
-        const float timer_scale = 1.8f;
+        const float timer_scale = 1.5f;
         const float timer_y = pad;
         if (s.mission.type == Mission::Race) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
