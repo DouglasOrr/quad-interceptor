@@ -45,6 +45,8 @@
 FOREACH_GL_FUNCTION(DECLARE_EXTERN)
 #undef DECLARE_EXTERN
 
+enum class WindowMode : uint8_t { Windowed, Fullscreen };
+
 enum class Key : uint8_t {
     w,
     a,
@@ -73,7 +75,7 @@ struct Window {
     struct State;
     inline static constexpr int audio_sample_rate = 44100;
 
-    Window(const char* title, int width, int height);
+    Window(const char* title, int width, int height, WindowMode mode);
     ~Window();
 
     // Swap buffers and process input events, returns false if the window should close

@@ -40,7 +40,8 @@ static constexpr SDL_Scancode key_scancodes[] = {
 };
 static_assert(std::size(key_scancodes) == static_cast<size_t>(Key::count));
 
-Window::Window(const char* title, int width, int height) : state(std::make_unique<State>()) {
+Window::Window(const char* title, int width, int height, WindowMode mode)
+    : state(std::make_unique<State>()) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
@@ -52,8 +53,18 @@ Window::Window(const char* title, int width, int height) : state(std::make_uniqu
     // MSAA (antialiasing) via multisampled framebuffer.
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
     SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+
+    uint32_t flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
+    if (mode == WindowMode::Fullscreen) {
+        SDL_DisplayMode dm;
+        if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
+            width = dm.w;
+            height = dm.h;
+        }
+        flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+    }
     state->window = SDL_CreateWindow(title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, width,
-                                     height, SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN);
+                                     height, flags);
     if (!state->window) {
         std::string err = std::string("Failed to create window: ") + SDL_GetError();
         SDL_Quit();
