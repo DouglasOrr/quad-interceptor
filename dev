@@ -315,7 +315,7 @@ def _p95(vals: list[float]) -> float:
     return vals[idx]
 
 
-@cli("--timeout", type=float, default=60, help="period (s) to measure")
+@cli("--timeout", type=float, default=30, help="period (s) to measure")
 def report(variant: str, timeout: float) -> None:
     """run an AI sandbox benchmark and write a short report"""
     variant_dir = ROOT / "build" / variant
@@ -332,6 +332,7 @@ def report(variant: str, timeout: float) -> None:
             "mission=sandbox",
             f"timeout={timeout}",
             "profile=true",
+            "window=full",
         ),
         reload=False,
         with_=("gpu",),
@@ -371,9 +372,9 @@ def report(variant: str, timeout: float) -> None:
         f"\n"
         f"Size: {size:,} bytes\n"
         f"\n"
-        f"Frame time: {frame_avg * 1000:.0f} ms (p95 {frame_p95 * 1000:.1f} ms)\n"
+        f"FPS: {1.0 / total_avg:.0f} (p95 {1.0 / total_p95:.0f})\n"
         f"\n"
-        f"FPS: {1.0 / total_avg:.0f} (lower p95 {1.0 / total_p95:.0f})\n"
+        f"Frame time: {frame_avg * 1000:.0f} ms (p95 {frame_p95 * 1000:.1f} ms)\n"
         f"\n"
         f"GPU busy: {gpu_avg:.0f}% (p95 {gpu_p95:.0f}%)\n"
         f"\n"
