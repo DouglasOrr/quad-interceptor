@@ -247,10 +247,10 @@ constexpr float ai_random_direction_frac = 0.5f;
 
 struct DroneAI {
     uint id;
-    Pid lift = {.target = 1.0f, .lo = 0.0f, .hi = 1.0f, .kp = 16.0f, .ki = 1.0f, .kd = 1.0f};
-    Pid yaw = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 1.0f, .kd = 0.5f};
-    Pid pitch = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 0.25f};
-    Pid roll = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 0.25f};
+    Pid lift = {.target = 1.0f, .lo = 0.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.06f, .kd = 16.67f};
+    Pid yaw = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.06f, .kd = 8.33f};
+    Pid pitch = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 4.17f};
+    Pid roll = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 4.17f};
     Pid lateral = {.target = 1.0f,
                    .lo = -ai_max_roll_angle,
                    .hi = ai_max_roll_angle,

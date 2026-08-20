@@ -293,9 +293,9 @@ void game_loop(Window& window, const Mission& mission, bool player_ai, float tim
             return;
         }
         if (!player_ai) copy_control(window, player_drone(state).control_m);
-        ai.update(state, player_ai);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
+            ai.update(state, player_ai);
             Physics::tick(state);
             physics_time -= Physics::dt;
         }
