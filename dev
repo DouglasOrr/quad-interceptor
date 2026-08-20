@@ -4,6 +4,7 @@
 
 import argparse
 import hashlib
+import re
 import json
 import statistics
 import struct
@@ -157,7 +158,7 @@ def build(variant: str, targets: tuple[str, ...]) -> None:
     sh("ninja", "-C", str(variant_dir), *targets)
     game = variant_dir / "game"
     if game.exists():
-        print(f"  {game.stat().st_size / (1 << 20):.3f} MB  {game.relative_to(ROOT)}")
+        print(f"  {game.stat().st_size:,} bytes  {game.relative_to(ROOT)}")
 
 
 @contextmanager
@@ -224,7 +225,27 @@ def run(
         with _gpu_top(variant_dir / "gpu.jsonl" if "gpu" in tools else None):
             sh(*cmd())
         if "perf" in tools:
-            sh("perf", "report", "-i", str(perf_data))
+            out = subprocess.run(
+                [
+                    "perf",
+                    "report",
+                    "-i",
+                    str(perf_data),
+                    "--stdio",
+                    "-q",
+                    "--no-children",
+                ],
+                capture_output=True,
+                text=True,
+            ).stdout
+            lines = [
+                re.sub(r"\s+", " ", line).strip()
+                for line in out.splitlines()
+                if re.match(r"^\s*[0-9.]*%", line)
+            ]
+            report_path = variant_dir / "perf.report"
+            report_path.write_text("\n".join(lines) + "\n")
+            print(report_path.relative_to(ROOT))
         return
 
     def get_src_mtime() -> float:
@@ -316,14 +337,13 @@ def _p95(vals: list[float]) -> float:
 
 
 @cli("--timeout", type=float, default=30, help="period (s) to measure")
-def report(variant: str, timeout: float) -> None:
+@cli("--vsync", action="store_true", help="enable vsync")
+def benchmark(variant: str, timeout: float, vsync: bool) -> None:
     """run an AI sandbox benchmark and write a short report"""
     variant_dir = ROOT / "build" / variant
-    profile = variant_dir / "game.profile"
-    gpu = variant_dir / "gpu.jsonl"
-    for path in (profile, gpu):
-        if path.exists():
-            path.unlink()
+    for f in "game.profile", "gpu.jsonl", "perf.data", "report.txt":
+        if (variant_dir / f).exists():
+            (variant_dir / f).unlink()
     run(
         variant,
         program_args=(
@@ -332,31 +352,30 @@ def report(variant: str, timeout: float) -> None:
             "mission=sandbox",
             f"timeout={timeout}",
             "profile=true",
+            f"vsync={'true' if vsync else 'false'}",
             "window=full",
         ),
         reload=False,
-        with_=("gpu",),
+        with_=("gpu", "perf"),
     )
 
-    frames = _read_profile(profile)
+    frames = _read_profile(variant_dir / "game.profile")
     if not frames:
-        fail(f"no frames in {profile}")
+        fail(f"no frames in game.profile")
     t_swap = [f[0] for f in frames]
     t_frame = [f[1] for f in frames]
     t_audio = [f[2] for f in frames]
 
-    size = (variant_dir / "game").stat().st_size
-    stamp = time.strftime("%Y%m%dT%H:%M")
     audio_busy = [
         t_audio[i] / (t_swap[i] + t_frame[i]) * 100.0 for i in range(len(frames))
     ]
     total_frame_time = [t_swap[i] + t_frame[i] for i in range(len(frames))]
-    gpu_busy = []
-    if gpu.exists():
-        for line in gpu.read_text().splitlines():
-            obj = json.loads(line)
-            if "busy" in obj:
-                gpu_busy.append(obj["busy"] * 100.0)
+    gpu_busy, gpu_power = [], []
+    for line in (variant_dir / "gpu.jsonl").read_text().splitlines():
+        obj = json.loads(line)
+        if "busy" in obj:
+            gpu_busy.append(obj["busy"] * 100.0)
+            gpu_power.append(obj["power_W"])  # ignore power when the game isn't running
 
     def stats(vals: list[float]) -> tuple[float, float]:
         return statistics.mean(vals), _p95(vals)
@@ -364,23 +383,18 @@ def report(variant: str, timeout: float) -> None:
     frame_avg, frame_p95 = stats(t_frame)
     total_avg, total_p95 = stats(total_frame_time)
     audio_avg, audio_p95 = stats(audio_busy)
-    gpu_avg, gpu_p95 = stats(gpu_busy) if gpu_busy else (0.0, 0.0)
+    gpu_avg, gpu_p95 = stats(gpu_busy)
+    gpu_power_avg, gpu_power_p95 = stats(gpu_power)
 
     report_path = variant_dir / "report.txt"
     report_path.write_text(
-        f"# {stamp}\n"
-        f"\n"
-        f"Size: {size:,} bytes\n"
-        f"\n"
-        f"FPS: {1.0 / total_avg:.0f} (p95 {1.0 / total_p95:.0f})\n"
-        f"\n"
-        f"Frame time: {frame_avg * 1000:.0f} ms (p95 {frame_p95 * 1000:.1f} ms)\n"
-        f"\n"
-        f"GPU busy: {gpu_avg:.0f}% (p95 {gpu_p95:.0f}%)\n"
-        f"\n"
+        f"       FPS: {1.0 / total_avg:.0f} (p95 {1.0 / total_p95:.0f})\n"
+        f"Frame time: {frame_avg * 1000:.1f} ms (p95 {frame_p95 * 1000:.1f} ms)\n"
+        f"  GPU busy: {gpu_avg:.0f}% (p95 {gpu_p95:.0f}%)\n"
+        f" GPU power: {gpu_power_avg:.1f} W (p95 {gpu_power_p95:.1f} W)\n"
         f"Audio busy: {audio_avg:.0f}% (p95 {audio_p95:.0f}%)\n"
     )
-    print(report_path.read_text())
+    print(f"{report_path.relative_to(ROOT)}\n\n{report_path.read_text()}")
 
 
 @cli()

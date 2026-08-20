@@ -10,6 +10,7 @@ TEST_CASE("game loop runs for a few frames") {
         .width = 1000,
         .height = 600,
         .msaa = 1,
+        .vsync = true,
         .profile_path = "",
     });
     for (auto& mission : Mission::all()) {

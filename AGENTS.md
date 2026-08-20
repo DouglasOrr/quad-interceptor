@@ -15,7 +15,7 @@ examples/<DD>-<name> -- standalone examples/demos
 
 ## Commands
 
-- `./dev -v <debug|release> build` (also `run`, `clean`, `ci`)
+- `./dev -v <debug|release|profile> build` (also `run`, `clean`, `ci`, `benchmark`)
 - `./dev run test`
 
 ## Instructions
@@ -33,3 +33,13 @@ examples/<DD>-<name> -- standalone examples/demos
 - Prefer concise code. Inline implementations where possible. Outline for reuse or clarity, where it reduces complexity.
 - Avoid default arguments/initialisers - prefer being explicit at call site.
 - Use comments sparingly, only when intent is otherwise unclear, and keep them brief.
+
+## Writing a report.md
+
+Match the existing format (keep brief & focussed).
+
+- Record ISO datetime, commit hash, "battery" or "plugged_in"
+  - Run `./dev -v debug run test` and `./dev -v release run test`, report "passed" or "failed (tests...)"
+- Run `./dev -v release build game` and report the size (printed)
+- Run `./dev -v release benchmark` and copy in the output.
+- Run `./dev -v profile benchmark --vsync` and copy in the output. Also copy the top 20 lines from `perf.report`.

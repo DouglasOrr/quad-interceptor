@@ -16,6 +16,7 @@ int main(int argc, char** argv) {
         .width = 1920,
         .height = 1080,
         .msaa = 1,
+        .vsync = true,
         .profile_path = "",
     };
     bool player_ai = false;
@@ -65,6 +66,15 @@ int main(int argc, char** argv) {
                 settings.profile_path = "";
             } else {
                 std::cerr << "Error! Unknown profile=" << value << std::endl;
+                return 1;
+            }
+        } else if (key == "vsync") {
+            if (value == "true") {
+                settings.vsync = true;
+            } else if (value == "false") {
+                settings.vsync = false;
+            } else {
+                std::cerr << "Error! Unknown vsync=" << value << std::endl;
                 return 1;
             }
         } else if (key == "msaa") {

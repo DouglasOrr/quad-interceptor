@@ -77,6 +77,7 @@ struct WindowSettings {
     int width;
     int height;
     uint msaa;
+    bool vsync;
     std::string profile_path;
 };
 

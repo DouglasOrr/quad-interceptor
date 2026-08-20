@@ -103,8 +103,7 @@ Window::Window(const WindowSettings& settings) : state(std::make_unique<State>()
     FOREACH_GL_FUNCTION(LOAD_GL)
 #undef LOAD_GL
 
-    // Disable vsync when profiling, enable otherwise
-    SDL_GL_SetSwapInterval(state->profile_path.empty() ? 1 : 0);
+    SDL_GL_SetSwapInterval(settings.vsync ? 1 : 0);
 
     // Open audio device
     SDL_AudioSpec desired, obtained;
