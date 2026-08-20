@@ -10,9 +10,15 @@ int main(int argc, char** argv) {
     // Defaults
     const auto missions = Mission::all();
     auto mission = missions.begin();
-    WindowMode window_mode = WindowMode::Windowed;
+    WindowSettings settings{
+        .title = "Small Game",
+        .mode = WindowMode::Windowed,
+        .width = 1920,
+        .height = 1080,
+        .msaa = 1,
+        .profile_path = "",
+    };
     bool player_ai = false;
-    std::string profile = "";
     float timeout = 0.0f;
 
     for (int i = 1; i < argc; ++i) {
@@ -34,9 +40,9 @@ int main(int argc, char** argv) {
             mission = found;
         } else if (key == "window") {
             if (value == "full") {
-                window_mode = WindowMode::Fullscreen;
+                settings.mode = WindowMode::Fullscreen;
             } else if (value == "medium") {
-                window_mode = WindowMode::Windowed;
+                settings.mode = WindowMode::Windowed;
             } else {
                 std::cerr << "Error! Unknown window=" << value << std::endl;
                 return 1;
@@ -54,19 +60,21 @@ int main(int argc, char** argv) {
             timeout = std::atof(std::string(value).c_str());
         } else if (key == "profile") {
             if (value == "true") {
-                profile = std::string(argv[0]) + ".profile";
+                settings.profile_path = std::string(argv[0]) + ".profile";
             } else if (value == "false") {
-                profile = "";
+                settings.profile_path = "";
             } else {
                 std::cerr << "Error! Unknown profile=" << value << std::endl;
                 return 1;
             }
+        } else if (key == "msaa") {
+            settings.msaa = static_cast<uint>(std::atoi(std::string(value).c_str()));
         } else {
             std::cerr << "Error! Unknown arg " << arg << std::endl;
             return 1;
         }
     }
 
-    Window window("Small Game", 1920, 1080, window_mode, profile);
+    Window window(settings);
     game_loop(window, *mission, player_ai, timeout);
 }

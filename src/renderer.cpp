@@ -494,7 +494,9 @@ constexpr Vec<3> fog_color{0.15f, 0.15f, 0.2f};
 constexpr float fog_end = float(city_radius) * City::cell_size;
 constexpr float fog_start = fog_end * 0.5f;
 constexpr int minimap_cells = 25;  // radar radius, in street cells
-constexpr int minimap_size = 300;  // square side, in pixels
+constexpr float minimap_size_ratio = 0.25f;
+constexpr float attitude_size_ratio = 0.15f;
+constexpr float hud_pad_ratio = 0.02f;
 
 // Fixed rotation from drone axes to OpenGL camera axes. Cameras look down
 // local -z (forward) with +y up; we want forward = drone +x, up = drone +z,
@@ -618,15 +620,17 @@ void main(){
     }
 
     void draw(const GameState& s) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float min_dim = std::min(float(vp[2]), float(vp[3]));
+        const int minimap_size = int(min_dim * minimap_size_ratio);
+        const int pad = int(min_dim * hud_pad_ratio);
         const float R = City::cell_size * minimap_cells;
-        const float px_to_world = 2.0f * R / float(minimap_size);  // 1px radius -> world scale
 
         const auto& player = player_drone(s);
         const Vec<3>& p = player.position;
 
-        GLint vp[4];
-        glGetIntegerv(GL_VIEWPORT, vp);
-        glViewport(vp[2] - minimap_size - 16, 16, minimap_size, minimap_size);
+        glViewport(vp[2] - minimap_size - pad, pad, minimap_size, minimap_size);
         glDisable(GL_DEPTH_TEST);
         glDisable(GL_BLEND);
 
@@ -687,7 +691,7 @@ void main(){
             Vec<2> rel = {d.position[0] - p[0], d.position[1] - p[1]};
             float dist = length(rel);
             Vec<2> marker_pos = (dist > R && dist > 0.0f) ? (R / dist) * rel : rel;
-            draw_disc(4.0f * px_to_world, marker_pos, color);
+            draw_disc(12.0f, marker_pos, color);  // note: absolute size scales better
         });
 
         // Objective marker on minimap
@@ -808,12 +812,13 @@ void main(){
 
     void draw(const GameState& s, TextBatch& text) {
         const Drone& d = player_drone(s);
-        const uint attitude_size = 140;
-        const uint pad = 16;
-
-        // Draw the attitude indicator as a circle in the lower-left
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
+        const float min_dim = std::min(float(vp[2]), float(vp[3]));
+        const uint attitude_size = uint(min_dim * attitude_size_ratio);
+        const uint pad = uint(min_dim * hud_pad_ratio);
+
+        // Draw the attitude indicator as a circle in the lower-left
         glViewport(pad, pad, attitude_size, attitude_size);
         glDisable(GL_DEPTH_TEST);
         glDepthMask(GL_FALSE);
@@ -838,8 +843,8 @@ void main(){
         // Text readouts to the right of the attitude indicator
         char buf[64];
         const auto font_size = text.base_font_size();
-        const float text_x = 16.0f + attitude_size + 24.0f;
-        const float text_y0 = pad;
+        const float text_x = 3 * float(pad) + float(attitude_size);
+        const float text_y0 = float(pad);
         const float scale = 1.0f;
         const float line_h = font_size[1] * scale * 1.5f;
 

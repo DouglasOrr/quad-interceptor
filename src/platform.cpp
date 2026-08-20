@@ -58,13 +58,8 @@ static constexpr SDL_Scancode key_scancodes[] = {
 };
 static_assert(std::size(key_scancodes) == static_cast<size_t>(Key::count));
 
-Window::Window(const std::string& title,
-               int width,
-               int height,
-               WindowMode mode,
-               const std::string& profile_path)
-    : state(std::make_unique<State>()) {
-    state->profile_path = profile_path;
+Window::Window(const WindowSettings& settings) : state(std::make_unique<State>()) {
+    state->profile_path = settings.profile_path;
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
         throw std::runtime_error(std::string("Failed to initialize SDL: ") + SDL_GetError());
     }
@@ -74,11 +69,15 @@ Window::Window(const std::string& title,
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
     // MSAA (antialiasing) via multisampled framebuffer.
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-    SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 4);
+    if (settings.msaa > 1) {
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
+        SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, settings.msaa);
+    }
 
     uint32_t flags = SDL_WINDOW_OPENGL | SDL_WINDOW_SHOWN;
-    if (mode == WindowMode::Fullscreen) {
+    int width = settings.width;
+    int height = settings.height;
+    if (settings.mode == WindowMode::Fullscreen) {
         SDL_DisplayMode dm;
         if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
             width = dm.w;
@@ -86,8 +85,8 @@ Window::Window(const std::string& title,
         }
         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
-    state->window = SDL_CreateWindow(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                     width, height, flags);
+    state->window = SDL_CreateWindow(settings.title.c_str(), SDL_WINDOWPOS_CENTERED,
+                                     SDL_WINDOWPOS_CENTERED, width, height, flags);
     if (!state->window) {
         std::string err = std::string("Failed to create window: ") + SDL_GetError();
         SDL_Quit();
@@ -104,12 +103,8 @@ Window::Window(const std::string& title,
     FOREACH_GL_FUNCTION(LOAD_GL)
 #undef LOAD_GL
 
-    // Set defaults
-    int w, h;
-    SDL_GL_GetDrawableSize(state->window, &w, &h);
-    glViewport(0, 0, w, h);
-    // Disable vsync when profiling
-    SDL_GL_SetSwapInterval(profile_path.empty() ? 1 : 0);
+    // Disable vsync when profiling, enable otherwise
+    SDL_GL_SetSwapInterval(state->profile_path.empty() ? 1 : 0);
 
     // Open audio device
     SDL_AudioSpec desired, obtained;
@@ -176,9 +171,7 @@ bool Window::frame() {
         if (event.type == SDL_QUIT) return false;
         if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) return false;
     }
-
     state->prev_held_keys = state->held_keys;
-
     int numkeys = 0;
     const Uint8* kb = SDL_GetKeyboardState(&numkeys);
     for (size_t i = 0; i < state->held_keys.size(); ++i) {
@@ -192,6 +185,9 @@ bool Window::frame() {
             state->held_keys[i] = sc < numkeys && kb[sc];
         }
     }
+    int w, h;
+    SDL_GL_GetDrawableSize(state->window, &w, &h);
+    glViewport(0, 0, w, h);
     return true;
 }
 
