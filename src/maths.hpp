@@ -238,6 +238,12 @@ inline constexpr Vec<3> rotate(Quat q, Vec<3> v) {
     return v + qw * t + cross(qxyz, t);
 }
 
+inline Quat quat_from_axis_angle(Vec<3> axis, float angle) {
+    Vec<3> a = normalise(axis);
+    float s = std::sin(angle / 2);
+    return {a[0] * s, a[1] * s, a[2] * s, std::cos(angle / 2)};
+}
+
 // Inverse of a rigid [R|t] transform: [R^T | -R^T t].
 inline constexpr Mat4 rigid_inverse(const Mat4& m) {
     Mat4 r{};

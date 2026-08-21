@@ -45,6 +45,7 @@ constexpr float enemy_spawn_alt = 20.0f;
 constexpr float sandbox_kill_radius = city_blocks(6);
 constexpr float chase_escape_radius = city_blocks(2.5);
 constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
+constexpr float cam_horizon_bias = 0.2f;             // 0 = none; 1 = look fully at z=0 horizon
 
 Vec<3> player_spawn(const GameState& s, const std::optional<Drone>& player) {
     Vec<2> c;
@@ -252,7 +253,13 @@ void GameManager::update(GameState& s) {
     // Player camera update
     const auto& p = player_drone(s);
     s.camera_pos = p.position + rotate(p.orientation, cam_offset_vec);
-    s.camera_orientation = p.orientation;
+    // Bias the view towards the z=0 horizon: flatten the camera's pitch by a
+    // fraction (preserving heading and roll) so the horizon is better framed.
+    Vec<3> fwd = rotate(p.orientation, Vec<3>{1.0f, 0.0f, 0.0f});
+    float pitch = -std::asin(std::clamp(fwd[2] / length(fwd), -1.0f, 1.0f));
+    Vec<3> right = rotate(p.orientation, Vec<3>{0.0f, -1.0f, 0.0f});
+    Quat bias = quat_from_axis_angle(right, cam_horizon_bias * pitch);
+    s.camera_orientation = normalise(bias * p.orientation);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

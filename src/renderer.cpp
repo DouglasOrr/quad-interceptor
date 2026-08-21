@@ -1553,7 +1553,7 @@ void Renderer::draw(const GameState& s, float dt) {
     const auto& player = player_drone(s);
 
     // Camera view
-    Mat4 view_mat = rigid_inverse(mul(mat_from(player.orientation, s.camera_pos), cam_rotation));
+    Mat4 view_mat = rigid_inverse(mul(mat_from(s.camera_orientation, s.camera_pos), cam_rotation));
     Mat4 view_projection_mat = mul(state->projection, view_mat);
 
     // Scene
