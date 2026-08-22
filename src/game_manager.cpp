@@ -60,13 +60,18 @@ Vec<3> player_spawn(const GameState& s, const std::optional<Drone>& player) {
     return {c[0], c[1], player_spawn_alt};
 }
 
-Drone& spawn_drone(uint& next_drone_id, GameState& s, Drone::Kind kind, Vec<3> position) {
+Drone& spawn_drone(uint& next_drone_id,
+                   GameState& s,
+                   Drone::Kind kind,
+                   const DroneType& type,
+                   Vec<3> position) {
     if (kind == Drone::Kind::Player) {
         std::erase_if(s.drones, [](const Drone& d) { return d.kind == Drone::Kind::Player; });
     }
     Drone d;
     d.id = next_drone_id++;
     d.kind = kind;
+    d.type = type;
     d.position = position;
     d.velocity = {};
     d.orientation = {0.0f, 0.0f, 0.0f, 1.0f};
@@ -75,19 +80,55 @@ Drone& spawn_drone(uint& next_drone_id, GameState& s, Drone::Kind kind, Vec<3> p
     d.lock_on = 0;
     d.control_m = {};
     d.motor_speed = {};
-    Pid rot = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    lift.enabled = false;
-    d.pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
+    d.rate_pid = type.rate_pid;
+    d.tilt_pid = type.tilt_pid;
     s.drones.push_back(d);
     return s.drones.back();
 }
 }  // namespace
 
+std::vector<DroneType> DroneType::all() {
+    DroneType acro;
+    acro.name = "acro";
+    acro.mass = 1.0f;
+    acro.inv_inertia_m = mat_diag(0.4f, 0.4f, 1.5f);
+    acro.damping_m = mat_diag(0.2f, 0.2f, 1.0f);
+    acro.ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f);
+    acro.motor_force = 8.0f;
+    acro.motor_torque = 0.6f;
+    acro.motor_offsets_m = DroneType::motor_offsets_from_radius(0.5f);
+    acro.height = 0.15f;
+    acro.collision_radius = 0.4f;
+    acro.control = Control::Acro;
+    Pid rot = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    lift.enabled = false;
+    acro.rate_pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
+    Pid angle = {
+        .target = 35.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
+    acro.tilt_pid = {angle, angle};  // unused in Acro
+
+    DroneType tilt = acro;
+    tilt.name = "tilt";
+    tilt.control = Control::Tilt;
+    tilt.damping_m = mat_diag(0.2f, 2.0f, 1.0f);  // high lateral drag, so it doesn't slide sideways
+
+    return {acro, tilt};
+}
+
+DroneType DroneType::enemy() {
+    DroneType type = all().front();  // identical to the player's acro drone (for now)
+    type.name = "enemy";
+    return type;
+}
+
 std::vector<Mission> Mission::all() {
+    DroneType default_player = DroneType::all().front();
+
     Mission defense;
     defense.type = Mission::Defense;
     defense.name = "defense";
+    defense.player_type = default_player;
     defense.enemy_spawn_radius = city_blocks(3);
     defense.enemy_spawn_interval = 10.0f;
     defense.max_enemies = 3;
@@ -98,6 +139,7 @@ std::vector<Mission> Mission::all() {
     Mission sandbox;
     sandbox.type = Mission::Sandbox;
     sandbox.name = "sandbox";
+    sandbox.player_type = default_player;
     sandbox.enemy_spawn_radius = city_blocks(2);
     sandbox.enemy_spawn_interval = 10.0f;
     sandbox.max_enemies = 3;
@@ -106,6 +148,7 @@ std::vector<Mission> Mission::all() {
     Mission race;
     race.type = Mission::Race;
     race.name = "race";
+    race.player_type = default_player;
     race.enemy_spawn_radius = 0.0f;
     race.enemy_spawn_interval = 0.0f;
     race.max_enemies = 0;
@@ -119,6 +162,7 @@ std::vector<Mission> Mission::all() {
     Mission chase;
     chase.type = Mission::Chase;
     chase.name = "chase";
+    chase.player_type = default_player;
     chase.enemy_spawn_radius = city_blocks(1);
     chase.enemy_spawn_interval = 0.0f;
     chase.max_enemies = 1;
@@ -145,7 +189,8 @@ void GameManager::update(GameState& s) {
     bool has_player = std::any_of(s.drones.begin(), s.drones.end(),
                                   [](auto& d) { return d.kind == Drone::Kind::Player; });
     if (!has_player)
-        spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s, std::nullopt));
+        spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.mission.player_type,
+                    player_spawn(s, std::nullopt));
     auto& player = player_drone(s);
 
     // Mission updates
@@ -203,7 +248,8 @@ void GameManager::update(GameState& s) {
             state->player_respawn_tick = s.tick + uint64(respawn_delay / Physics::dt);
         if (s.tick >= state->player_respawn_tick) {
             state->player_respawn_tick = 0;
-            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, player_spawn(s, player));
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.mission.player_type,
+                        player_spawn(s, player));
         }
     }
 
@@ -244,7 +290,7 @@ void GameManager::update(GameState& s) {
                                  center[1] + s.mission.enemy_spawn_radius * std::sin(angle)};
             Vec<2> spawn_xy =
                 City::intersection_center(City::nearest_intersection_block(target_pos));
-            spawn_drone(state->next_drone_id, s, Drone::Kind::Enemy,
+            spawn_drone(state->next_drone_id, s, Drone::Kind::Enemy, DroneType::enemy(),
                         {spawn_xy[0], spawn_xy[1], enemy_spawn_alt});
             state->next_enemy_spawn_tick = 0;
         }

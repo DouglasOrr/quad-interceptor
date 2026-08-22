@@ -11,13 +11,6 @@ constexpr Vec<3> up = {0.0f, 0.0f, 1.0f};
 constexpr Vec<3> gravity = {0.0f, 0.0f, -10.0f};
 
 // Drone
-constexpr float body_mass = 1.0f;
-constexpr Mat3 damping_m = mat_diag(0.2f, 0.2f, 1.0f);
-constexpr Mat3 body_inv_inertia_m = mat_diag(0.4f, 0.4f, 1.5f);
-constexpr float motor_force = 8.0f;
-constexpr float motor_torque = 0.6f;
-constexpr Mat3 ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f);
-
 constexpr float explosion_radius = 5.0f;
 constexpr float lock_on_rate = 1 / 15.0f;
 constexpr float lock_on_reset_rate = 1 / 30.0f;
@@ -38,6 +31,16 @@ float Pid::operator()(float control, float actual, float dt) {
     float delta = (error - prev) / dt;
     prev = error;
     return std::clamp(kp * error + ki * integral + kd * delta, lo, hi);
+}
+
+std::array<Vec<3>, 4> DroneType::motor_offsets_from_radius(float radius) {
+    const float r = radius / M_SQRT2f;
+    return {{
+        {{r, r, 0.0f}},    // FL
+        {{r, -r, 0.0f}},   // FR
+        {{-r, r, 0.0f}},   // BL
+        {{-r, -r, 0.0f}},  // BR
+    }};
 }
 
 City::Pos City::nearest_cell(Vec<2> v) {
@@ -144,6 +147,14 @@ bool hits_building(const City& city, Vec<3> p, float r) {
     }
     return false;
 }
+float attitude_roll(const Quat& orientation) {  // + = rolled right (as control_m)
+    Vec<3> left = rotate(orientation, {0.0f, 1.0f, 0.0f});
+    return std::asin(std::clamp(left[2], -1.0f, 1.0f));
+}
+float attitude_pitch(const Quat& orientation) {  // + = nose down (as control_m)
+    Vec<3> fwd = rotate(orientation, {1.0f, 0.0f, 0.0f});
+    return -std::asin(std::clamp(fwd[2], -1.0f, 1.0f));
+}
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -153,12 +164,13 @@ void Physics::tick(GameState& state) {
     ++state.tick;
     auto& player = player_drone(state);
     foreach_drone(state, [&](size_t, Drone& d) {
+        const auto& t = d.type;
         auto R = mat_from(d.orientation);
         auto Rt = transpose(R);
-        auto ang_vel_m = mul(body_inv_inertia_m, mul(Rt, d.ang_momentum));  // actual rates (model)
+        auto ang_vel_m = mul(t.inv_inertia_m, mul(Rt, d.ang_momentum));  // actual rates (model)
 
         // Collisions (building)
-        if (hits_building(state.city, d.position, Drone::collision_radius)) {
+        if (hits_building(state.city, d.position, t.collision_radius)) {
             d.status = Drone::Status::Crashed;
             return;
         }
@@ -185,8 +197,8 @@ void Physics::tick(GameState& state) {
         }
 
         // Collisions (floor)
-        if (d.position[2] - Drone::height <= 0.0f) {
-            d.position[2] = Drone::height;
+        if (d.position[2] - t.height <= 0.0f) {
+            d.position[2] = t.height;
             constexpr auto floor_drag = 8.0f;
             d.velocity[0] -= (dt * floor_drag) * sign(d.velocity[0]);
             d.velocity[1] -= (dt * floor_drag) * sign(d.velocity[1]);
@@ -199,11 +211,18 @@ void Physics::tick(GameState& state) {
             }
         }
 
-        // Controls - PID
-        auto lift = d.pid[2](d.control_m[2], d.velocity[2], dt);
-        auto cw = d.pid[3](d.control_m[3], -ang_vel_m[2], dt);
-        auto roll = d.pid[0](d.control_m[0], ang_vel_m[0], dt);
-        auto pitch = d.pid[1](d.control_m[1], ang_vel_m[1], dt);
+        // Controls - tilt (attitude) PID, converting an angle command to a rate command
+        auto control = d.control_m;
+        if (t.control == DroneType::Control::Tilt) {
+            control[0] = d.tilt_pid[0](d.control_m[0], attitude_roll(d.orientation), dt);
+            control[1] = d.tilt_pid[1](d.control_m[1], attitude_pitch(d.orientation), dt);
+        }
+
+        // Controls - rate PID
+        auto lift = d.rate_pid[2](control[2], d.velocity[2], dt);
+        auto cw = d.rate_pid[3](control[3], -ang_vel_m[2], dt);
+        auto roll = d.rate_pid[0](control[0], ang_vel_m[0], dt);
+        auto pitch = d.rate_pid[1](control[1], ang_vel_m[1], dt);
 
         // Motor mixer
         auto cFL = lift + cw - pitch + roll;
@@ -211,27 +230,28 @@ void Physics::tick(GameState& state) {
         auto cBL = lift - cw + pitch + roll;
         auto cBR = lift + cw + pitch - roll;
 
-        auto _speed = [](float c) { return std::min(1.0f, std::abs(c) / 3.0f); };
+        auto motor_speed_scale = 3.0f;
+        auto _speed = [&](float c) { return std::min(1.0f, std::abs(c) / motor_speed_scale); };
         d.motor_speed = {_speed(cFL), _speed(cFR), _speed(cBL), _speed(cBR)};
 
         // Forces
-        auto force = body_mass * gravity;
-        force += motor_force * (cFL + cFR + cBL + cBR) * mul(R, up);
-        force -= mul(R, mul(damping_m, mul(Rt, d.velocity)));
+        auto force = t.mass * gravity;
+        force += t.motor_force * (cFL + cFR + cBL + cBR) * mul(R, up);
+        force -= mul(R, mul(t.damping_m, mul(Rt, d.velocity)));
 
         // Torques
-        auto torque_m = motor_torque * (-cFL + cFR + cBL - cBR) * up;
-        torque_m += cross(Drone::motor_offsets_m[0], cFL * motor_force * up);
-        torque_m += cross(Drone::motor_offsets_m[1], cFR * motor_force * up);
-        torque_m += cross(Drone::motor_offsets_m[2], cBL * motor_force * up);
-        torque_m += cross(Drone::motor_offsets_m[3], cBR * motor_force * up);
+        auto torque_m = t.motor_torque * (-cFL + cFR + cBL - cBR) * up;
+        torque_m += cross(t.motor_offsets_m[0], cFL * t.motor_force * up);
+        torque_m += cross(t.motor_offsets_m[1], cFR * t.motor_force * up);
+        torque_m += cross(t.motor_offsets_m[2], cBL * t.motor_force * up);
+        torque_m += cross(t.motor_offsets_m[3], cBR * t.motor_force * up);
         auto torque = mul(R, torque_m);
 
         // Dynamics
-        d.velocity += (dt / body_mass) * force;
+        d.velocity += (dt / t.mass) * force;
         d.position += dt * d.velocity;
         auto ang_vel = mul(R, ang_vel_m);
-        d.ang_momentum += dt * (torque - mul(R, mul(ang_damping_m, ang_vel_m)));
+        d.ang_momentum += dt * (torque - mul(R, mul(t.ang_damping_m, ang_vel_m)));
         d.orientation = normalise(d.orientation + 0.5 * dt * (quat_pure(ang_vel) * d.orientation));
     });
 }
@@ -373,15 +393,14 @@ void steer_drone(const GameState& s, DroneAI& a, Drone& d) {
     // Pitch - aim for a target nose-down angle (when facing the waypoint)
     float target_pitch =
         std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle;
-    float pitch_angle = -std::asin(std::clamp(fwd[2], -1.0f, 1.0f));
-    d.control_m[1] = a.pitch(target_pitch, pitch_angle, Physics::dt);
+    auto pitch = attitude_pitch(d.orientation);
+    d.control_m[1] = a.pitch(target_pitch, pitch, Physics::dt);
 
     // Lateral Vel > Roll - aim for zero lateral motion.
     float lat_vel = -d.velocity[0] * fwd_xy[1] + d.velocity[1] * fwd_xy[0];
     float target_roll = -a.lateral(0.0f, lat_vel, Physics::dt);
-    Vec<3> right = rotate(d.orientation, {0.0f, 1.0f, 0.0f});
-    float roll_angle = std::asin(std::clamp(right[2], -1.0f, 1.0f));
-    d.control_m[0] = a.roll(target_roll, roll_angle, Physics::dt);
+    auto roll = attitude_roll(d.orientation);
+    d.control_m[0] = a.roll(target_roll, roll, Physics::dt);
 }
 }  // namespace
 

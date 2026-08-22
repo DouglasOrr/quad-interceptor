@@ -875,6 +875,9 @@ void main(){
             text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, lives_col);
         }
 
+        const char* mode = (d.type.control == DroneType::Control::Tilt) ? "TILT" : "ACRO";
+        text.draw(mode, text_x, text_y0 + line_h * 4.0f, scale, {0.6f, 0.6f, 0.6f});
+
         const float timer_scale = 1.5f;
         const float timer_y = pad;
         if (s.mission.type == Mission::Race) {
@@ -1243,8 +1246,8 @@ void main(){
         std::vector<float> inst_angle;
         std::vector<float> inst_flip;
         for (int p = 0; p < 4; ++p) {
-            Vec<3> offset = Drone::motor_offsets_m[p];
-            offset[2] = Drone::height * 0.55f;
+            Vec<3> offset = d.type.motor_offsets_m[p];
+            offset[2] = d.type.height * 0.55f;
             float dir = (p == 0 || p == 3) ? 1.0f : -1.0f;
             prop.angles[p] += dir * 80.0f * (0.3f + d.motor_speed[p]) * dt;
             float angle = prop.angles[p];
@@ -1396,8 +1399,10 @@ void main(){
         std::vector<float> verts;
         auto cube = make_cube();
         auto cyl = make_cylinder(16, /*caps*/ true);
-        float rr = 0.5f * length(Drone::motor_offsets_m[0] - Drone::motor_offsets_m[3]);
-        float hh = Drone::height;
+        // One shared mesh, sized from a reference DroneType (for now)
+        const DroneType ref = DroneType::all().front();
+        float rr = 0.5f * length(ref.motor_offsets_m[0] - ref.motor_offsets_m[3]);
+        float hh = ref.height;
         for (float ang : {pi / 4.0f, -pi / 4.0f}) {
             Quat qz{0, 0, std::sin(ang / 2), std::cos(ang / 2)};
             Mat4 model = mul(mat_rigid(mat_from(qz), Vec<3>{0, 0, 0}),
@@ -1405,7 +1410,7 @@ void main(){
             append_vertices(verts, cube, model);
         }
         append_vertices(verts, cube, mat_diag(rr * 0.5f, rr * 0.5f, hh * 0.5f, 1.0f));
-        for (const auto& offset : Drone::motor_offsets_m) {
+        for (const auto& offset : ref.motor_offsets_m) {
             Mat4 scale = mat_diag(hh * 0.6f, hh * 0.6f, hh, 1.0f);
             Mat4 model = mul(mat_rigid(mat_from(Quat{1, 0, 0, 0}), offset), scale);
             append_vertices(verts, cyl, model);

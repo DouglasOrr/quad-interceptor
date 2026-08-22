@@ -36,24 +36,45 @@ struct Pid {
     float operator()(float control, float actual, float dt);
 };
 
+struct DroneType {
+    enum class Control { Acro, Tilt };
+
+    std::string name;
+
+    // Airframe
+    float mass;
+    Mat3 inv_inertia_m;
+    Mat3 damping_m;      // linear drag
+    Mat3 ang_damping_m;  // angular drag
+    float motor_force;   // thrust per unit motor command
+    float motor_torque;  // yaw reaction torque per unit motor command
+
+    // Geometry
+    std::array<Vec<3>, 4> motor_offsets_m;  // (FL, FR, BL, BR)
+    float height;
+    float collision_radius;
+
+    // Control
+    Control control;
+    std::array<Pid, 4> rate_pid;  // (roll, pitch, lift, yaw)
+    std::array<Pid, 2> tilt_pid;  // (roll, pitch), Tilt only; target = max tilt angle
+
+    // Factories
+    static std::array<Vec<3>, 4> motor_offsets_from_radius(float radius);
+    static std::vector<DroneType> all();  // player-selectable variants
+    static DroneType enemy();
+};
+
 struct Drone {
     enum class Status { Alive, Crashed, Detonated };
     enum class Kind { Player, Enemy };
 
-    inline static constexpr float height = 0.15f;
-    inline static constexpr float collision_radius = 0.4f;
-    inline static constexpr float _radius = 0.5f;
     inline static constexpr float lock_on_level = 80.0f;
-    inline static constexpr std::array<Vec<3>, 4> motor_offsets_m = {{
-        {{_radius / M_SQRT2f, _radius / M_SQRT2f, 0.0f}},    // FL
-        {{_radius / M_SQRT2f, -_radius / M_SQRT2f, 0.0f}},   // FR
-        {{-_radius / M_SQRT2f, _radius / M_SQRT2f, 0.0f}},   // BL
-        {{-_radius / M_SQRT2f, -_radius / M_SQRT2f, 0.0f}},  // BR
-    }};
 
     // Identity
     uint id;
     Kind kind;
+    DroneType type;
 
     // State
     Vec<3> position;      // (world)
@@ -64,9 +85,10 @@ struct Drone {
     float lock_on;
 
     // Control
-    Vec<4> control_m;        // (roll R/L, pitch F/B, lift U/D, yaw CW/CCW) in [-1, 1]
-    std::array<Pid, 4> pid;  // (roll, pitch, lift, yaw)
-    Vec<4> motor_speed;      // (FL, FR, BL, BR) in [0, 1]
+    Vec<4> control_m;             // (roll R/L, pitch F/B, lift U/D, yaw CW/CCW) in [-1, 1]
+    std::array<Pid, 4> rate_pid;  // (roll, pitch, lift, yaw)
+    std::array<Pid, 2> tilt_pid;  // (roll, pitch)
+    Vec<4> motor_speed;           // (FL, FR, BL, BR) in [0, 1]
 };
 
 struct Cell {
@@ -97,6 +119,7 @@ struct Mission {
     enum Type { Defense, Sandbox, Race, Chase };
     Type type;
     std::string name;
+    DroneType player_type;
     std::vector<Circle> objectives;  // empty in sandbox
     float enemy_spawn_radius;        // around objective (defense) or player (sandbox, chase)
     float enemy_spawn_interval;

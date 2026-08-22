@@ -23,17 +23,17 @@ constexpr float dead_noise_gain = 4000.0f;
 }  // namespace
 
 struct AudioEngine::State {
+    struct MotorAudio {
+        Vec<3> cam_to_motor;
+        float speed;  // 0..1
+        float audio_freq;
+        float audio_phase;
+    };
     struct DroneAudio {
         uint id;
         Drone::Kind kind;
-        // game state
-        Vec<3> position;
-        Quat orientation;
-        Vec<4> motor_speed;
-        Drone::Status status = Drone::Status::Alive;
-        // audio state
-        std::array<float, 4> motor_phase{};
-        std::array<float, 4> motor_freq{};
+        Drone::Status status;
+        std::array<MotorAudio, 4> motors;
     };
 
     std::mutex mutex;
@@ -60,19 +60,26 @@ void AudioEngine::update(const GameState& game_state) {
     sync_parallel(
         game_state.drones, state->drones,
         [&](const Drone& d) {
-            State::DroneAudio da;
-            da.id = d.id;
-            da.kind = d.kind;
-            for (float& p : da.motor_phase) {
-                p = 0.5f * (state->next_noise() + 1.0f);
+            std::array<State::MotorAudio, 4> motors;
+            for (auto m = 0u; m < 4; ++m) {
+                motors[m].audio_freq = 0;
+                motors[m].audio_phase = 0.5f * (state->next_noise() + 1.0f);
             }
-            return da;
+            return State::DroneAudio{
+                .id = d.id,
+                .kind = d.kind,
+                .status = d.status,
+                .motors = motors,
+            };
         },
         [&](const Drone& d, auto& da) {
-            da.position = d.position;
-            da.orientation = d.orientation;
-            da.motor_speed = d.motor_speed;
             da.status = d.status;
+            auto motor_offsets_m = d.type.motor_offsets_m;
+            for (auto m = 0u; m < da.motors.size(); ++m) {
+                da.motors[m].cam_to_motor =
+                    d.position + rotate(d.orientation, motor_offsets_m[m]) - game_state.camera_pos;
+                da.motors[m].speed = std::min(d.motor_speed[m], motor_max_speed) / motor_max_speed;
+            }
         });
 }
 
@@ -82,45 +89,38 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
 
     for (auto& d : state->drones) {
         if (d.status != Drone::Status::Alive) continue;
-        for (int m = 0; m < 4; ++m) {
-            float speed = std::min(d.motor_speed[m], motor_max_speed) / motor_max_speed;
-            Vec<3> to_motor =
-                d.position + rotate(d.orientation, Drone::motor_offsets_m[m]) - state->cam_pos;
-            float dist = length(to_motor);
+        for (auto& m : d.motors) {
+            float dist = length(m.cam_to_motor);
 
             // Gain & pan
             float gain = motor_base_gain;
             gain *= 1.0f / (1 + atten_near * dist + atten_far * dist * dist);
-            gain *= std::min(1.0f, speed * motor_speed_gain_scale + motor_speed_gain_floor);
+            gain *= std::min(1.0f, m.speed * motor_speed_gain_scale + motor_speed_gain_floor);
             float pan = 0.0f;
             if (dist > 1e-4f) {
-                pan = dot(to_motor, state->cam_right) / dist;
+                pan = dot(m.cam_to_motor, state->cam_right) / dist;
             }
             pan = std::clamp(pan, -1.0f, 1.0f);
 
             float left_gain = gain * (0.5f - 0.5f * pan);
             float right_gain = gain * (0.5f + 0.5f * pan);
+            float freq_target = motor_base_freq + m.speed * (motor_max_freq - motor_base_freq);
 
-            float target = motor_base_freq + speed * (motor_max_freq - motor_base_freq);
-            float freq = d.motor_freq[m];
-            float phase = d.motor_phase[m];
-
+            // Render samples
             for (int i = 0; i < num_samples; ++i) {
                 constexpr float inv_sample_rate = 1.0f / float(Window::audio_sample_rate);
                 constexpr float freq_step = motor_freq_slew * inv_sample_rate;
-                freq += std::clamp(target - freq, -freq_step, freq_step);
-                phase += freq * inv_sample_rate;
-                if (phase >= 1.0f) phase -= 1.0f;
-                float saw = 2.0f * (phase - std::floor(phase + 0.5f));
-                float sq = (phase < 0.5f) ? 1.0f : -1.0f;
+                m.audio_freq += std::clamp(freq_target - m.audio_freq, -freq_step, freq_step);
+                m.audio_phase += m.audio_freq * inv_sample_rate;
+                if (m.audio_phase >= 1.0f) m.audio_phase -= 1.0f;
+                float saw = 2.0f * (m.audio_phase - std::floor(m.audio_phase + 0.5f));
+                float sq = (m.audio_phase < 0.5f) ? 1.0f : -1.0f;
                 float noise = state->next_noise();
                 float sample = (0.4f * saw + 0.2f * sq + 0.4f * noise);
 
                 state->mix_buf[i * 2 + 0] += sample * left_gain;
                 state->mix_buf[i * 2 + 1] += sample * right_gain;
             }
-            d.motor_freq[m] = freq;
-            d.motor_phase[m] = phase;
         }
     }
 

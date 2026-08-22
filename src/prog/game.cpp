@@ -9,7 +9,8 @@
 int main(int argc, char** argv) {
     // Defaults
     const auto missions = Mission::all();
-    auto mission = missions.begin();
+    auto mission = missions.front();
+    std::optional<DroneType> player_type;
     WindowSettings settings{
         .title = "Small Game",
         .mode = WindowMode::Windowed,
@@ -38,7 +39,16 @@ int main(int argc, char** argv) {
                 std::cerr << "Error! Unknown mission=" << value << std::endl;
                 return 1;
             }
-            mission = found;
+            mission = *found;
+        } else if (key == "drone") {
+            const auto drone_types = DroneType::all();
+            auto found = std::find_if(drone_types.begin(), drone_types.end(),
+                                      [value](auto& t) { return t.name == value; });
+            if (found == drone_types.end()) {
+                std::cerr << "Error! Unknown drone=" << value << std::endl;
+                return 1;
+            }
+            player_type = *found;
         } else if (key == "window") {
             if (value == "full") {
                 settings.mode = WindowMode::Fullscreen;
@@ -84,7 +94,8 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    if (player_type) mission.player_type = *player_type;
 
     Window window(settings);
-    game_loop(window, *mission, player_ai, timeout);
+    game_loop(window, mission, player_ai, timeout);
 }
