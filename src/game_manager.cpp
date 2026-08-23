@@ -124,6 +124,7 @@ DroneType DroneType::enemy() {
 
 std::vector<Mission> Mission::all() {
     DroneType default_player = DroneType::all().front();
+    std::vector<Mission> missions;
 
     Mission sandbox;
     sandbox.type = Mission::Sandbox;
@@ -135,6 +136,7 @@ std::vector<Mission> Mission::all() {
     sandbox.starting_lives = 0;
     sandbox.time_limit = 0.0f;
     sandbox.player_ai = false;
+    missions.push_back(sandbox);
 
     Mission defense;
     defense.type = Mission::Defense;
@@ -148,6 +150,7 @@ std::vector<Mission> Mission::all() {
     defense.player_ai = false;
     defense.objectives = {Circle{
         City::intersection_center(City::nearest_intersection_block({0, 0})), City::cell_size}};
+    missions.push_back(defense);
 
     Mission race;
     race.type = Mission::Race;
@@ -164,6 +167,7 @@ std::vector<Mission> Mission::all() {
     for (auto p : waypoints) {
         race.objectives.push_back({City::intersection_center(p), City::cell_size});
     }
+    missions.push_back(race);
 
     Mission chase;
     chase.type = Mission::Chase;
@@ -175,8 +179,9 @@ std::vector<Mission> Mission::all() {
     chase.starting_lives = 3;
     chase.time_limit = 60.0f;
     chase.player_ai = false;
+    missions.push_back(chase);
 
-    return {defense, sandbox, race, chase};
+    return missions;
 }
 
 struct GameManager::State {

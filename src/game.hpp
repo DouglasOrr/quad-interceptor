@@ -234,11 +234,16 @@ private:
 #define gassert(cond) ((cond) ? (void)0 : gg_assert_fail(#cond, __FILE__, __LINE__))
 
 template <typename... Args>
+inline void print(const Args&... args) {
+    ((std::cerr << ' ' << args), ...);
+    std::cerr << '\n';
+}
+
+template <typename... Args>
 inline void print(const GameState& state, uint period, const Args&... args) {
     if (state.tick % period == 0) {
         std::cerr << '[' << state.tick << "]";
-        ((std::cerr << ' ' << args), ...);
-        std::cerr << '\n';
+        print(args...);
     }
 }
 
