@@ -95,7 +95,9 @@ int main(int argc, char** argv) {
         }
     }
     if (player_type) mission.player_type = *player_type;
+    mission.player_ai = player_ai;
+    mission.time_limit = timeout;
 
     Window window(settings);
-    game_loop(window, mission, player_ai, timeout);
+    game_loop(window, mission);
 }

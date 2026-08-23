@@ -125,17 +125,6 @@ DroneType DroneType::enemy() {
 std::vector<Mission> Mission::all() {
     DroneType default_player = DroneType::all().front();
 
-    Mission defense;
-    defense.type = Mission::Defense;
-    defense.name = "defense";
-    defense.player_type = default_player;
-    defense.enemy_spawn_radius = city_blocks(3);
-    defense.enemy_spawn_interval = 10.0f;
-    defense.max_enemies = 3;
-    defense.starting_lives = 5;
-    defense.objectives = {Circle{
-        City::intersection_center(City::nearest_intersection_block({0, 0})), City::cell_size}};
-
     Mission sandbox;
     sandbox.type = Mission::Sandbox;
     sandbox.name = "sandbox";
@@ -144,6 +133,21 @@ std::vector<Mission> Mission::all() {
     sandbox.enemy_spawn_interval = 10.0f;
     sandbox.max_enemies = 3;
     sandbox.starting_lives = 0;
+    sandbox.time_limit = 0.0f;
+    sandbox.player_ai = false;
+
+    Mission defense;
+    defense.type = Mission::Defense;
+    defense.name = "defense";
+    defense.player_type = default_player;
+    defense.enemy_spawn_radius = city_blocks(3);
+    defense.enemy_spawn_interval = 10.0f;
+    defense.max_enemies = 3;
+    defense.starting_lives = 5;
+    defense.time_limit = 0.0f;
+    defense.player_ai = false;
+    defense.objectives = {Circle{
+        City::intersection_center(City::nearest_intersection_block({0, 0})), City::cell_size}};
 
     Mission race;
     race.type = Mission::Race;
@@ -153,6 +157,8 @@ std::vector<Mission> Mission::all() {
     race.enemy_spawn_interval = 0.0f;
     race.max_enemies = 0;
     race.starting_lives = 0;
+    race.time_limit = 0.0f;
+    race.player_ai = false;
     const std::vector<City::Pos> waypoints = {{0, 0},  {0, 2},   {2, 2},  {2, 0}, {2, -2},
                                               {0, -2}, {-2, -2}, {-2, 0}, {0, 0}};
     for (auto p : waypoints) {
@@ -168,6 +174,7 @@ std::vector<Mission> Mission::all() {
     chase.max_enemies = 1;
     chase.starting_lives = 3;
     chase.time_limit = 60.0f;
+    chase.player_ai = false;
 
     return {defense, sandbox, race, chase};
 }
@@ -177,7 +184,6 @@ struct GameManager::State {
     uint64 player_respawn_tick = 0;
     uint64 next_enemy_spawn_tick = 0;
     uint64 race_start_tick = 0;
-    uint64 chase_end_tick = 0;
     bool player_was_alive = true;
 };
 
@@ -192,6 +198,11 @@ void GameManager::update(GameState& s) {
         spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.mission.player_type,
                     player_spawn(s, std::nullopt));
     auto& player = player_drone(s);
+
+    if (s.mission.time_limit > 0 && s.mission.type != Mission::Race) {
+        auto end_tick = uint64(s.mission.time_limit / Physics::dt);
+        s.timer = (s.tick < end_tick) ? (end_tick - s.tick) : 0;
+    }
 
     // Mission updates
     if (s.mission.type == Mission::Defense) {
@@ -230,10 +241,6 @@ void GameManager::update(GameState& s) {
         }
     }
     if (s.mission.type == Mission::Chase) {
-        if (state->chase_end_tick == 0) {
-            state->chase_end_tick = s.tick + uint64(s.mission.time_limit / Physics::dt);
-        }
-        s.timer = (s.tick < state->chase_end_tick) ? (state->chase_end_tick - s.tick) : 0;
         if (player.status == Drone::Status::Detonated && state->player_was_alive) {
             ++s.kill_count;
         }
@@ -324,7 +331,7 @@ void copy_control(const Window& w, Vec<4>& c) {
 }
 }  // namespace
 
-void game_loop(Window& window, const Mission& mission, bool player_ai, float timeout) {
+void game_loop(Window& window, const Mission& mission) {
     GameState state{};
     state.mission = mission;
     state.lives = state.mission.starting_lives;
@@ -340,15 +347,15 @@ void game_loop(Window& window, const Mission& mission, bool player_ai, float tim
     float physics_time = 0.0f;
     while (window.frame()) {
         const float dt = stopwatch.lap();
-        if (timeout > 0 && state.tick * Physics::dt >= timeout) break;
+        if (mission.time_limit > 0 && state.tick * Physics::dt >= mission.time_limit) break;
         if (window.pressed(Key::hash)) {
-            game_loop(window, mission, player_ai, timeout);
+            game_loop(window, mission);
             return;
         }
-        if (!player_ai) copy_control(window, player_drone(state).control_m);
+        if (!mission.player_ai) copy_control(window, player_drone(state).control_m);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
-            ai.update(state, player_ai);
+            ai.update(state);
             Physics::tick(state);
             physics_time -= Physics::dt;
         }

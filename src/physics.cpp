@@ -411,12 +411,13 @@ struct AI::State {
 AI::AI() : state(std::make_unique<State>()) {}
 AI::~AI() = default;
 
-void AI::update(GameState& s, bool control_player) {
+void AI::update(GameState& s) {
     sync_parallel(
         s.drones, state->drones, [](const Drone& d) { return DroneAI{.id = d.id}; },
         [&](Drone& d, DroneAI& a) {
             if (d.status != Drone::Status::Alive) return;
-            if (d.kind == Drone::Kind::Enemy || (control_player && d.kind == Drone::Kind::Player)) {
+            if (d.kind == Drone::Kind::Enemy ||
+                (s.mission.player_ai && d.kind == Drone::Kind::Player)) {
                 steer_drone(s, a, d);
             }
         });

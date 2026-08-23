@@ -126,6 +126,7 @@ struct Mission {
     uint max_enemies;
     uint starting_lives;
     float time_limit;
+    bool player_ai;
 
     static std::vector<Mission> all();
 };
@@ -158,7 +159,7 @@ private:
     std::unique_ptr<State> state;
 };
 
-void game_loop(Window& window, const Mission& mission, bool player_ai, float timeout);
+void game_loop(Window& window, const Mission& mission);
 
 struct Font {
     struct Glyph {
@@ -185,7 +186,7 @@ struct AI {
     AI();
     ~AI();
 
-    void update(GameState& state, bool control_player);
+    void update(GameState& state);
 
 private:
     struct State;
