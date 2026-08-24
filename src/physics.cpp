@@ -237,6 +237,7 @@ void Physics::tick(GameState& state) {
 
             // Controls
             auto [roll, pitch, lift, yaw] = d.control_m.data;
+            if (t.mix_roll_to_yaw) yaw += t.mix_roll_to_yaw * roll;
 
             // Controls - angle PIDs
             if (t.pid_roll_angle)

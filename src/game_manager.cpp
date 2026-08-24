@@ -98,6 +98,7 @@ std::vector<DroneType> DroneType::all() {
     acro.height = 0.15f;
     acro.collision_radius = 0.4f;
     acro.control = Control::Acro;
+    acro.mix_roll_to_yaw = 0.0f;
     Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
     acro.pid_roll_rate = rate;
     acro.pid_pitch_rate = rate;
@@ -107,8 +108,9 @@ std::vector<DroneType> DroneType::all() {
     tilt.name = "tilt";
     tilt.control = Control::Tilt;
     tilt.damping_m = mat_diag(0.2f, 2.0f, 1.0f);  // high lateral drag, so it doesn't slide sideways
+    tilt.mix_roll_to_yaw = 0.6f;
     Pid angle = {
-        .target = 35.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
+        .target = 40.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
     tilt.pid_roll_angle = angle;
     tilt.pid_pitch_angle = angle;
     tilt.pid_lift_rate = {
