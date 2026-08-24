@@ -31,8 +31,6 @@ struct Pid {
 };
 
 struct DroneType {
-    enum class Control { Acro, Tilt };
-
     std::string name;
 
     // Airframe
@@ -49,7 +47,6 @@ struct DroneType {
     float collision_radius;
 
     // Control
-    Control control;
     float mix_roll_to_yaw;
     std::optional<Pid> pid_roll_rate, pid_pitch_rate, pid_lift_rate, pid_yaw_rate;
     std::optional<Pid> pid_roll_angle, pid_pitch_angle;  // Tilt only; target = max tilt angle
