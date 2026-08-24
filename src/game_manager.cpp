@@ -111,6 +111,8 @@ std::vector<DroneType> DroneType::all() {
         .target = 35.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
     tilt.pid_roll_angle = angle;
     tilt.pid_pitch_angle = angle;
+    tilt.pid_lift_rate = {
+        .target = 20.0f, .lo = -1.0f, .hi = 1.0f, .kp = 10.0f, .ki = 2.0f, .kd = 0.0f};
 
     return {acro, tilt};
 }
@@ -329,8 +331,8 @@ void copy_control(const Window& w, Vec<4>& c) {
     // Arrows
     c[0] += f(w.held(Key::right)) - f(w.held(Key::left));
     c[1] += f(w.held(Key::up)) - f(w.held(Key::down));
-    // ZXC
-    c[2] += 2 * f(w.held(Key::x)) - 1;
+    // ZXC + Alt
+    c[2] = f(w.held(Key::x)) - f(w.held(Key::alt));
     c[3] += f(w.held(Key::c)) - f(w.held(Key::z));
 }
 }  // namespace

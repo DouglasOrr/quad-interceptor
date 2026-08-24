@@ -168,7 +168,7 @@ float attitude_pitch(const Quat& orientation) {  // + = nose down (as control_m)
 struct Physics::State {
     struct Drone {
         uint id;
-        PidState roll_rate, pitch_rate, yaw_rate;
+        PidState roll_rate, pitch_rate, lift_rate, yaw_rate;
         PidState roll_angle, pitch_angle;
     };
     std::vector<Drone> drones;
@@ -244,14 +244,12 @@ void Physics::tick(GameState& state) {
             if (t.pid_pitch_angle)
                 pitch =
                     pid(*t.pid_pitch_angle, ps.pitch_angle, pitch, attitude_pitch(d.orientation));
-
             // Controls - rate PIDs
             if (t.pid_roll_rate) roll = pid(*t.pid_roll_rate, ps.roll_rate, roll, ang_vel_m[0]);
             if (t.pid_pitch_rate)
                 pitch = pid(*t.pid_pitch_rate, ps.pitch_rate, pitch, ang_vel_m[1]);
-            lift = std::clamp(lift, 0.0f, 1.0f);
+            if (t.pid_lift_rate) lift = pid(*t.pid_lift_rate, ps.lift_rate, lift, d.velocity[2]);
             if (t.pid_yaw_rate) yaw = pid(*t.pid_yaw_rate, ps.yaw_rate, yaw, -ang_vel_m[2]);
-
             // Motor mixer
             auto cFL = lift + yaw - pitch + roll;
             auto cFR = lift - yaw - pitch - roll;

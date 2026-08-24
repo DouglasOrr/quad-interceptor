@@ -64,6 +64,7 @@ enum class Key : uint8_t {
     x,
     z,
     ctrl,
+    alt,
     comma,
     period,
     esc,
