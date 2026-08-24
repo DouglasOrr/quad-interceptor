@@ -25,15 +25,9 @@ struct Circle {
 // Default world frame; an '_m' suffix marks a model(body)-frame quantity.
 
 struct Pid {
-    // config
     float target;
     float lo, hi;
     float kp, ki, kd;
-    bool enabled = true;
-    // state
-    float integral = 0.0f;
-    float prev = 0.0f;
-    float operator()(float control, float actual, float dt);
 };
 
 struct DroneType {
@@ -56,8 +50,8 @@ struct DroneType {
 
     // Control
     Control control;
-    std::array<Pid, 4> rate_pid;  // (roll, pitch, lift, yaw)
-    std::array<Pid, 2> tilt_pid;  // (roll, pitch), Tilt only; target = max tilt angle
+    std::optional<Pid> pid_roll_rate, pid_pitch_rate, pid_yaw_rate;
+    std::optional<Pid> pid_roll_angle, pid_pitch_angle;  // Tilt only; target = max tilt angle
 
     // Factories
     static std::array<Vec<3>, 4> motor_offsets_from_radius(float radius);
@@ -85,10 +79,8 @@ struct Drone {
     float lock_on;
 
     // Control
-    Vec<4> control_m;             // (roll R/L, pitch F/B, lift U/D, yaw CW/CCW) in [-1, 1]
-    std::array<Pid, 4> rate_pid;  // (roll, pitch, lift, yaw)
-    std::array<Pid, 2> tilt_pid;  // (roll, pitch)
-    Vec<4> motor_speed;           // (FL, FR, BL, BR) in [0, 1]
+    Vec<4> control_m;    // (roll R/L, pitch F/B, lift U/D, yaw CW/CCW) in [-1, 1]
+    Vec<4> motor_speed;  // (FL, FR, BL, BR) in [0, 1]
 };
 
 struct Cell {
@@ -179,7 +171,14 @@ struct Font {
 struct Physics {
     inline static constexpr float dt = 1e-3f;  // seconds
 
-    static void tick(GameState& state);
+    Physics();
+    ~Physics();
+
+    void tick(GameState& state);
+
+private:
+    struct State;
+    std::unique_ptr<State> state;
 };
 
 struct AI {

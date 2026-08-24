@@ -80,8 +80,6 @@ Drone& spawn_drone(uint& next_drone_id,
     d.lock_on = 0;
     d.control_m = {};
     d.motor_speed = {};
-    d.rate_pid = type.rate_pid;
-    d.tilt_pid = type.tilt_pid;
     s.drones.push_back(d);
     return s.drones.back();
 }
@@ -100,18 +98,19 @@ std::vector<DroneType> DroneType::all() {
     acro.height = 0.15f;
     acro.collision_radius = 0.4f;
     acro.control = Control::Acro;
-    Pid rot = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    Pid lift = {.target = 10.0f, .lo = 0.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    lift.enabled = false;
-    acro.rate_pid = {rot, rot, lift, rot};  // roll, pitch, lift, yaw
-    Pid angle = {
-        .target = 35.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
-    acro.tilt_pid = {angle, angle};  // unused in Acro
+    Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    acro.pid_roll_rate = rate;
+    acro.pid_pitch_rate = rate;
+    acro.pid_yaw_rate = rate;
 
     DroneType tilt = acro;
     tilt.name = "tilt";
     tilt.control = Control::Tilt;
     tilt.damping_m = mat_diag(0.2f, 2.0f, 1.0f);  // high lateral drag, so it doesn't slide sideways
+    Pid angle = {
+        .target = 35.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
+    tilt.pid_roll_angle = angle;
+    tilt.pid_pitch_angle = angle;
 
     return {acro, tilt};
 }
@@ -343,6 +342,7 @@ void game_loop(Window& window, const Mission& mission) {
     GameManager game_manager;
     game_manager.update(state);
     AI ai;
+    Physics physics;
     Renderer renderer;
     AudioEngine audio_engine;
     window.set_audio_callback([&audio_engine](int16_t* stream, int num_frames) {
@@ -361,7 +361,7 @@ void game_loop(Window& window, const Mission& mission) {
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
             ai.update(state);
-            Physics::tick(state);
+            physics.tick(state);
             physics_time -= Physics::dt;
         }
         game_manager.update(state);
