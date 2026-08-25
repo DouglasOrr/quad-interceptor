@@ -48,13 +48,19 @@ def main() -> int:
             continue
         iso_date = sh("git", "show", "-s", "--format=%cs", commit)[1].strip()
         record: dict = {"date": iso_date, "commit": commit}
-        code, _ = sh("./dev", "-v", "release", "build", "game")
+        # Always clean-build: the shared build dir persists across checkouts, so
+        # a stale (ninja mtime) or orphaned (.o) build would give wrong sizes.
+        code, _ = sh("./dev", "-v", "release", "clean")
         if code != 0:
-            record["error"] = "build"
-        elif GAME.exists():
-            record["size"] = GAME.stat().st_size
+            record["error"] = "clean"
         else:
-            record["error"] = "file_missing"
+            code, _ = sh("./dev", "-v", "release", "build", "game")
+            if code != 0:
+                record["error"] = "build"
+            elif GAME.exists():
+                record["size"] = GAME.stat().st_size
+            else:
+                record["error"] = "file_missing"
         print(json.dumps(record), flush=True)
 
     sh("git", "checkout", "-q", args.to)

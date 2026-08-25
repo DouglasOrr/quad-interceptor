@@ -10,3 +10,7 @@ apt install clang clang-format libsdl2-dev ninja-build
 
 ./dev --help
 ```
+
+## Development
+
+Consider installing [bloaty](https://github.com/google/bloaty) for binary size analysis.
