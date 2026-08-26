@@ -992,6 +992,7 @@ struct CityView {
     Uniform u_fog_range;
     Mesh floor;
     Mesh buildings;
+    Mesh pillars;
     PhongMaterial floor_mat{.ambient = grey(0.1),
                             .diffuse = grey(0.9),
                             .specular = grey(0.1),
@@ -1037,6 +1038,18 @@ void main(){
         buildings.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
         buildings.add({.data = nullptr, .bytes = 0, .loc = 3, .comps = 3, .divisor = true});
 
+        auto pillar_verts = make_cylinder(20, /*caps*/ false);
+        pillars.mode = GL_TRIANGLES;
+        pillars.vertex_count = static_cast<GLsizei>(pillar_verts.size());
+        pillars.instance_count = 0;
+        pillars.add({.data = pillar_verts.data(),
+                     .bytes = static_cast<GLsizeiptr>(pillar_verts.size() * sizeof(Vec<3>)),
+                     .loc = 0,
+                     .comps = 3});
+        pillars.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
+        pillars.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+        pillars.add({.data = nullptr, .bytes = 0, .loc = 3, .comps = 3, .divisor = true});
+
         floor.mode = GL_TRIANGLES;
         floor.vertex_count = 6;
         floor.instance_count = 0;
@@ -1057,17 +1070,33 @@ void main(){
             anchor_y = ay;
             std::vector<float> floor_pos, floor_scale, floor_color;
             std::vector<float> buildings_pos, buildings_scale, buildings_color;
+            std::vector<float> pillars_pos, pillars_scale, pillars_color;
             for (int64 dy = -city_radius; dy <= city_radius; ++dy) {
                 for (int64 dx = -city_radius; dx <= city_radius; ++dx) {
-                    Cell c = city({ax + dx, ay + dy});
+                    auto c = city({ax + dx, ay + dy});
                     float wx = float(ax + dx) * cell;
                     float wy = float(ay + dy) * cell;
-                    if (c.height > 0.0f) {
+                    if (c.height) {
                         float k = float((c.hash >> 32) & 0xff) / 255.0f;
                         float shade = 0.2f + 0.2f * k;
-                        buildings_pos.insert(buildings_pos.end(), {wx, wy, 0.0f});
-                        buildings_scale.insert(buildings_scale.end(), {cell, cell, c.height});
+                        buildings_pos.insert(buildings_pos.end(), {wx, wy, c.base});
+                        buildings_scale.insert(buildings_scale.end(),
+                                               {cell, cell, c.height - c.base});
                         buildings_color.insert(buildings_color.end(), {shade, shade, shade});
+                        if (c.podium) {
+                            // Podium
+                            buildings_pos.insert(buildings_pos.end(), {wx, wy, 0.0f});
+                            buildings_scale.insert(buildings_scale.end(), {cell, cell, c.podium});
+                            buildings_color.insert(buildings_color.end(), {shade, shade, shade});
+                            // Stilts
+                            constexpr float pr = City::stilt_pillar_radius;
+                            pillars_pos.insert(
+                                pillars_pos.end(),
+                                {wx + 0.5f * cell - pr, wy + 0.5f * cell - pr, c.podium});
+                            pillars_scale.insert(pillars_scale.end(),
+                                                 {2.0f * pr, 2.0f * pr, c.base - c.podium});
+                            pillars_color.insert(pillars_color.end(), {0.35f, 0.35f, 0.4f});
+                        }
                     } else {
                         floor_pos.insert(floor_pos.end(), {wx, wy, 0.0f});
                         floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
@@ -1105,6 +1134,10 @@ void main(){
             buildings.buffers[1].upload(buildings_pos, GL_DYNAMIC_DRAW);
             buildings.buffers[2].upload(buildings_scale, GL_DYNAMIC_DRAW);
             buildings.buffers[3].upload(buildings_color, GL_DYNAMIC_DRAW);
+            pillars.instance_count = static_cast<GLsizei>(pillars_pos.size() / 3);
+            pillars.buffers[1].upload(pillars_pos, GL_DYNAMIC_DRAW);
+            pillars.buffers[2].upload(pillars_scale, GL_DYNAMIC_DRAW);
+            pillars.buffers[3].upload(pillars_color, GL_DYNAMIC_DRAW);
         }
         if (floor.instance_count > 0) {
             program.use();
@@ -1125,6 +1158,16 @@ void main(){
             u_fog_color.set(fog_color);
             u_fog_range.set(Vec<2>{fog_start, fog_end});
             buildings.draw();
+        }
+        if (pillars.instance_count > 0) {
+            program.use();
+            u_mvp.set(view_projection_mat);
+            building_mat.use();
+            u_light_dir.set(light_dir);
+            u_cam_pos.set(eye);
+            u_fog_color.set(fog_color);
+            u_fog_range.set(Vec<2>{fog_start, fog_end});
+            pillars.draw();
         }
     }
 };

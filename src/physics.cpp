@@ -20,6 +20,9 @@ constexpr Vec<2> city_building_height_range = {10.0f, 100.0f};
 constexpr Vec<2> city_skywalk_height_range = {10.0f, 80.0f};
 constexpr float city_skywalk_prob = 0.5f;
 constexpr float city_skywalk_clearance = 5.0f;
+constexpr float city_stilt_prob = 0.3f;
+constexpr Vec<2> city_stilt_podium_range = {1.0f, 40.0f};
+constexpr Vec<2> city_stilt_gap_range = {5.0f, 20.0f};
 ////////////////////////////////////////////////////////////////////////////////
 // PID
 
@@ -75,51 +78,83 @@ Vec<2> City::intersection_center(Pos block) {
     constexpr float hw = 0.5f * float(street_size) * cell_size;
     return {float(block[0]) * block_w + hw, float(block[1]) * block_w + hw};
 }
-
-Cell City::operator()(Pos p) const {
+City::Cell City::operator()(Pos p) const {
     uint64 h = hash(seed, p[0], p[1]);
     auto [bx, by] = block_index(p);
     auto [ox, oy] = block_offset(p);
 
     constexpr uint64 tag_x = 0x534b595f58ull;
     constexpr uint64 tag_y = 0x534b595f59ull;
+    constexpr uint64 tag_stilts = 0x5354494c5453ull;
+    constexpr uint64 tag_shade = 0x5348414445ull;
 
-    auto sample_skywalk = [&](uint64 tag, int64 a, int64 b) {
+    // A stilted block: solid lower floors [0, podium], a fly-through gap
+    // [podium, podium+gap], then variable per-cell buildings on top.
+    // Returns {podium, gap}; empty (podium==0) = block on the ground.
+    auto sample_block_base = [&](Pos block) {
+        uint64 h2 = hash(seed, tag_stilts, block[0], block[1]);
+        float us = (h2 & 0xffff) * (1.0f / float(1 << 16));
+        if (us >= city_stilt_prob) return std::tuple{0.0f, 0.0f};
+        float up = ((h2 >> 16) & 0xffff) * (1.0f / float(1 << 16));
+        float ug = ((h2 >> 32) & 0xffff) * (1.0f / float(1 << 16));
+        float podium = city_stilt_podium_range[0] +
+                       up * (city_stilt_podium_range[1] - city_stilt_podium_range[0]);
+        float gap =
+            city_stilt_gap_range[0] + ug * (city_stilt_gap_range[1] - city_stilt_gap_range[0]);
+        return std::tuple{podium, gap};
+    };
+
+    // This block's podium and the top of its gap (= building box bottom).
+    auto [this_podium, this_gap] = sample_block_base({bx, by});
+    float this_base = this_podium + this_gap;
+
+    // Reject a skywalk that would hang inside the gap of a neighbouring stilted
+    // block: check the block on the far side of the walkway and this block.
+    auto sample_skywalk = [&](uint64 tag, int64 a, int64 b, Pos blk_a) {
         uint64 h2 = hash(seed, tag, a, b);
         float prob = (h2 & 0xffff) * (1.0f / float(1 << 16));
         float u = ((h2 >> 16) & 0xffff) * (1.0f / float(1 << 16));
         if (prob >= city_skywalk_prob) return 0.0f;
-        return city_skywalk_height_range[0] +
-               u * (city_skywalk_height_range[1] - city_skywalk_height_range[0]);
+        float sw = city_skywalk_height_range[0] +
+                   u * (city_skywalk_height_range[1] - city_skywalk_height_range[0]);
+        auto [pod, gap] = sample_block_base(blk_a);
+        if (sw < pod + gap || sw < this_base) return 0.0f;
+        return sw;
     };
 
-    float height = 0.0f;
-    float skywalk_height = 0.0f;
-
-    if (City::street_size <= ox && City::street_size <= oy) {
+    City::Cell cell{};
+    if (City::street_size <= ox && City::street_size <= oy) {  // Building
         float u = (h & 0xffff) * (1.0f / float(1 << 16));
-        height = city_building_height_range[0] +
-                 u * (city_building_height_range[1] - city_building_height_range[0]);
+        float building = city_building_height_range[0] +
+                         u * (city_building_height_range[1] - city_building_height_range[0]);
+        cell.height = this_base + building;
+        cell.base = this_base;
+        cell.podium = this_podium;
+        cell.hash = hash(seed, tag_shade, p[0], p[1]);
 
         auto apply_skywalk = [&](float sw) {
             if (sw > 0.0f) {
-                height = std::max(height, sw + City::skywalk_thickness + city_skywalk_clearance);
+                cell.height =
+                    std::max(cell.height, sw + City::skywalk_thickness + city_skywalk_clearance);
             }
         };
-        if (ox == City::street_size) apply_skywalk(sample_skywalk(tag_x, bx, p[1]));
-        if (ox == int64(City::block_size - 1)) apply_skywalk(sample_skywalk(tag_x, bx + 1, p[1]));
-        if (oy == City::street_size) apply_skywalk(sample_skywalk(tag_y, p[0], by));
-        if (oy == int64(City::block_size - 1)) apply_skywalk(sample_skywalk(tag_y, p[0], by + 1));
-    } else {
+        if (ox == City::street_size) apply_skywalk(sample_skywalk(tag_x, bx, p[1], {bx - 1, by}));
+        if (ox == int64(City::block_size - 1))
+            apply_skywalk(sample_skywalk(tag_x, bx + 1, p[1], {bx + 1, by}));
+        if (oy == City::street_size) apply_skywalk(sample_skywalk(tag_y, p[0], by, {bx, by - 1}));
+        if (oy == int64(City::block_size - 1))
+            apply_skywalk(sample_skywalk(tag_y, p[0], by + 1, {bx, by + 1}));
+
+    } else {  // Street
         if (ox < City::street_size && oy >= City::street_size) {
-            skywalk_height = sample_skywalk(tag_x, bx, p[1]);
-            h = hash(seed, tag_x, bx, p[1]);
+            cell.skywalk_height = sample_skywalk(tag_x, bx, p[1], {bx - 1, by});
+            cell.hash = hash(seed, tag_x, bx);  // constant across the strip
         } else if (oy < City::street_size && ox >= City::street_size) {
-            skywalk_height = sample_skywalk(tag_y, p[0], by);
-            h = hash(seed, tag_y, p[0], by);
+            cell.skywalk_height = sample_skywalk(tag_y, p[0], by, {bx, by - 1});
+            cell.hash = hash(seed, tag_y, by);  // constant across the strip
         }
     }
-    return {height, skywalk_height, h};
+    return cell;
 }
 
 namespace {
@@ -133,11 +168,25 @@ bool hits_building(const City& city, Vec<3> p, float r) {
     const int64 cy1 = int64(std::floor((p[1] + r) / cs));
     for (int64 cy = cy0; cy <= cy1; ++cy) {
         for (int64 cx = cx0; cx <= cx1; ++cx) {
-            Cell c = city({cx, cy});
+            auto c = city({cx, cy});
             if (c.height > 0.0f) {
-                Vec<3> center = {(cx + 0.5f) * cs, (cy + 0.5f) * cs, 0.5f * c.height};
-                Vec<3> size = {cs, cs, c.height};
-                if (intersect_box_sphere(center, size, p, r)) return true;
+                Vec<2> pc = City::cell_center({cx, cy});
+                // Top
+                if (intersect_box_sphere({pc[0], pc[1], 0.5f * (c.base + c.height)},
+                                         {cs, cs, c.height - c.base}, p, r))
+                    return true;
+                // Podium
+                if (c.podium) {
+                    if (intersect_box_sphere({pc[0], pc[1], 0.5f * c.podium}, {cs, cs, c.podium}, p,
+                                             r))
+                        return true;
+                }
+                // Stilts
+                if (c.base > c.podium) {
+                    if (intersect_capsule_sphere({pc[0], pc[1], c.podium}, {pc[0], pc[1], c.base},
+                                                 City::stilt_pillar_radius, p, r))
+                        return true;
+                }
             }
             if (c.skywalk_height > 0.0f) {
                 auto [ox, oy] = City::block_offset({cx, cy});
@@ -329,7 +378,7 @@ float choose_safe_altitude(const City& city, const Vec<3>& pos, Vec<2> target_po
     Vec<2> dir = dist > 1e-3f ? normalise(to_tgt) : Vec<2>{0.0f, 0.0f};
     for (int i = 0; i <= n_lookahead; ++i) {
         float step = std::min(float(i) * City::cell_size, dist);
-        Cell c = city(City::nearest_cell(cur2 + step * dir));
+        auto c = city(City::nearest_cell(cur2 + step * dir));
         if (c.skywalk_height > 0.0f) {
             ranges.push_back(
                 {c.skywalk_height - margin, c.skywalk_height + City::skywalk_thickness + margin});

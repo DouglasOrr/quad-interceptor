@@ -81,22 +81,28 @@ struct Drone {
     Vec<4> motor_speed;  // (FL, FR, BL, BR) in [0, 1]
 };
 
-struct Cell {
-    float height;          // 0=street, >0=building
-    float skywalk_height;  // 0=no skywalk, >0=bottom altitude of skywalk
-    uint64 hash;
-};
-
 struct City {
     using Pos = std::array<int64, 2>;
+
+    // A cell can be:
+    //   street (height=base=podium=0)
+    //   tower: solid podium [0, podium], sparse stilts [podium, base], top [base, height]
+    struct Cell {
+        float height;          // cell top altitude
+        float base;            // block-common stilt-top altitude
+        float podium;          // block-common lower floors altitude
+        float skywalk_height;  // 0=no skywalk, >0=bottom altitude of skywalk
+        uint64 hash;
+    };
+
     inline static constexpr float cell_size = 15.0f;
     inline static constexpr uint block_size = 10;  // cells per city block (street grid period)
     inline static constexpr uint street_size = 2;  // street width, in cells (each block edge)
     inline static constexpr float skywalk_thickness = 5.0f;
+    inline static constexpr float stilt_pillar_radius = 1.2f;
 
     int64 seed;
     Cell operator()(Pos p) const;
-
     static Pos block_index(Pos p);
     static Pos block_offset(Pos p);
     static Pos nearest_cell(Vec<2> v);

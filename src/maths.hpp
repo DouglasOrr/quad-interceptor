@@ -319,3 +319,17 @@ inline constexpr bool intersect_box_sphere(Vec<3> box_center,
     Vec<3> d = q - sphere_center;
     return dot(d, d) < sphere_radius * sphere_radius;
 }
+
+// Capsule (rounded cylinder) vs sphere
+inline constexpr bool intersect_capsule_sphere(Vec<3> capsule_a,
+                                               Vec<3> capsule_b,
+                                               float capsule_r,
+                                               Vec<3> sphere_center,
+                                               float sphere_radius) {
+    Vec<3> ab = capsule_b - capsule_a;
+    float t = dot(sphere_center - capsule_a, ab) / (dot(ab, ab) + 1e-12f);
+    t = std::clamp(t, 0.0f, 1.0f);
+    Vec<3> d = (capsule_a + t * ab) - sphere_center;
+    auto r = capsule_r + sphere_radius;
+    return dot(d, d) < r * r;
+}
