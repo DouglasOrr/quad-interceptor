@@ -91,17 +91,12 @@ City::Cell City::operator()(Pos p) const {
     // A stilted block: solid lower floors [0, podium], a fly-through gap
     // [podium, podium+gap], then variable per-cell buildings on top.
     // Returns {podium, gap}; empty (podium==0) = block on the ground.
-    auto sample_block_base = [&](Pos block) {
+    auto sample_block_base = [&](Pos block) -> std::tuple<float, float> {
         uint64 h2 = hash(seed, tag_stilts, block[0], block[1]);
-        float us = (h2 & 0xffff) * (1.0f / float(1 << 16));
-        if (us >= city_stilt_prob) return std::tuple{0.0f, 0.0f};
-        float up = ((h2 >> 16) & 0xffff) * (1.0f / float(1 << 16));
-        float ug = ((h2 >> 32) & 0xffff) * (1.0f / float(1 << 16));
-        float podium = city_stilt_podium_range[0] +
-                       up * (city_stilt_podium_range[1] - city_stilt_podium_range[0]);
-        float gap =
-            city_stilt_gap_range[0] + ug * (city_stilt_gap_range[1] - city_stilt_gap_range[0]);
-        return std::tuple{podium, gap};
+        if (hash_u(h2, 0) >= city_stilt_prob) return {0.0f, 0.0f};
+        float podium = hash_u(h2, 16, city_stilt_podium_range[0], city_stilt_podium_range[1]);
+        float gap = hash_u(h2, 32, city_stilt_gap_range[0], city_stilt_gap_range[1]);
+        return {podium, gap};
     };
 
     // This block's podium and the top of its gap (= building box bottom).
@@ -112,11 +107,8 @@ City::Cell City::operator()(Pos p) const {
     // block: check the block on the far side of the walkway and this block.
     auto sample_skywalk = [&](uint64 tag, int64 a, int64 b, Pos blk_a) {
         uint64 h2 = hash(seed, tag, a, b);
-        float prob = (h2 & 0xffff) * (1.0f / float(1 << 16));
-        float u = ((h2 >> 16) & 0xffff) * (1.0f / float(1 << 16));
-        if (prob >= city_skywalk_prob) return 0.0f;
-        float sw = city_skywalk_height_range[0] +
-                   u * (city_skywalk_height_range[1] - city_skywalk_height_range[0]);
+        if (hash_u(h2, 0) >= city_skywalk_prob) return 0.0f;
+        float sw = hash_u(h2, 16, city_skywalk_height_range[0], city_skywalk_height_range[1]);
         auto [pod, gap] = sample_block_base(blk_a);
         if (sw < pod + gap || sw < this_base) return 0.0f;
         return sw;
@@ -124,9 +116,7 @@ City::Cell City::operator()(Pos p) const {
 
     City::Cell cell{};
     if (City::street_size <= ox && City::street_size <= oy) {  // Building
-        float u = (h & 0xffff) * (1.0f / float(1 << 16));
-        float building = city_building_height_range[0] +
-                         u * (city_building_height_range[1] - city_building_height_range[0]);
+        float building = hash_u(h, 0, city_building_height_range[0], city_building_height_range[1]);
         cell.height = this_base + building;
         cell.base = this_base;
         cell.podium = this_podium;
@@ -440,8 +430,7 @@ Vec<3> choose_next_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
         }
         City::Pos next;
         uint64 h = hash(s.city.seed, s.tick, a.id);
-        float u = (h & 0xffff) * (1.0f / float(1 << 16));
-        if (u >= ai_random_direction_frac && !reducing.empty()) {
+        if (hash_u(h, 0) >= ai_random_direction_frac && !reducing.empty()) {
             next = reducing[(h >> 16) % reducing.size()];
         } else {
             next = choices[(h >> 16) % choices.size()];

@@ -38,6 +38,12 @@ uint64 hash(uint64 seed, Args... args) {
     return h;
 }
 
+// Consumes bits [shift, shift+16) bits from h => [low, high)
+inline float hash_u(uint64 h, uint shift, float low = 0.0f, float high = 1.0f) {
+    float u = float((h >> shift) & 0xffff) * (1.0f / float(1 << 16));  // [0, 1)
+    return low + u * (high - low);
+}
+
 template <uint N>
 struct Vec {
     float data[N];

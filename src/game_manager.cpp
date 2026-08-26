@@ -295,7 +295,7 @@ void GameManager::update(GameState& s) {
         });
         if (enemy_count < s.mission.max_enemies) {
             uint64 h = hash(s.city.seed, s.tick, state->next_drone_id);
-            float angle = (h & 0xffff) * (2.0f * pi / float(1 << 16));
+            float angle = hash_u(h, 0, 0.0f, 2.0f * pi);
             Vec<2> center = s.mission.objectives.empty()
                                 ? Vec<2>{player.position[0], player.position[1]}
                                 : s.mission.objectives[0].center;

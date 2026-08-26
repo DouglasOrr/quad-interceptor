@@ -1077,8 +1077,7 @@ void main(){
                     float wx = float(ax + dx) * cell;
                     float wy = float(ay + dy) * cell;
                     if (c.height) {
-                        float k = float((c.hash >> 32) & 0xff) / 255.0f;
-                        float shade = 0.2f + 0.2f * k;
+                        float shade = hash_u(c.hash, 32, 0.2f, 0.4f);
                         buildings_pos.insert(buildings_pos.end(), {wx, wy, c.base});
                         buildings_scale.insert(buildings_scale.end(),
                                                {cell, cell, c.height - c.base});
@@ -1102,8 +1101,7 @@ void main(){
                         floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
                         floor_color.insert(floor_color.end(), {0.15f, 0.15f, 0.15f});
                         if (c.skywalk_height > 0.0f) {
-                            float k = float((c.hash >> 32) & 0xff) / 255.0f;
-                            float shade = 0.25f + 0.2f * k;
+                            float shade = hash_u(c.hash, 32, 0.25f, 0.45f);
                             constexpr float T = City::skywalk_thickness;
                             auto [ox, oy] = City::block_offset({ax + dx, ay + dy});
                             float sx, sy, px, py;
