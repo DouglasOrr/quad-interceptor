@@ -1274,7 +1274,7 @@ void main(){
         // Drone dots
         flat.prog.use();
         flat.u_use_instancing.set(0);
-        flat.u_radius.set(0.0f);
+        flat.u_radius.set(R);
         flat.u_alpha.set(1.0f);
         foreach_drone(s, [&](size_t, const Drone& d) {
             Vec<3> color = (d.kind == Drone::Kind::Player) ? Vec<3>{0.2f, 0.75f, 0.95f}
@@ -1291,6 +1291,7 @@ void main(){
         // Objective rings
         for (size_t i = 0; i < s.mission.objectives.size(); ++i) {
             const Circle& o = s.mission.objectives[i];
+            flat.u_radius.set(R);
             flat.u_scale.set(o.radius);
             flat.u_translate.set(Vec<2>{o.center[0] - p[0], o.center[1] - p[1]});
             Vec<3> color = (s.mission.type != Mission::Race) ? Vec<3>{0.2f, 0.9f, 0.4f}
