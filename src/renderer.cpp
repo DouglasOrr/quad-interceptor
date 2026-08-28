@@ -1432,10 +1432,13 @@ void main(){
 
         int alt_v = int(std::round(d.position[2]));
         Vec<3> alt_col = {1.0f, 1.0f, 1.0f};
-        if (d.position[2] >= Drone::lock_on_level) {
-            alt_col = {1.0f, 0.2f, 0.2f};
-        } else if (d.position[2] >= Drone::lock_on_level - 10.0f) {
-            alt_col = {1.0f, 0.6f, 0.0f};
+        if (s.terrain.type.kind == TerrainType::Kind::City) {
+            const float lock_on_level = s.terrain.type.city.lock_on_level;
+            if (d.position[2] >= lock_on_level) {
+                alt_col = {1.0f, 0.2f, 0.2f};
+            } else if (d.position[2] >= lock_on_level - 10.0f) {
+                alt_col = {1.0f, 0.6f, 0.0f};
+            }
         }
         int vs_v = int(std::round(d.velocity[2]));
         std::snprintf(buf, sizeof(buf), "ALT %3d %+1d", alt_v, vs_v);

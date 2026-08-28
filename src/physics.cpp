@@ -327,8 +327,9 @@ void Physics::tick(GameState& state) {
             }
 
             // Alitutude-based lock-on death (player only)
-            if (d.kind == Drone::Kind::Player) {
-                if (d.position[2] > Drone::lock_on_level) {
+            if (d.kind == Drone::Kind::Player &&
+                state.terrain.type.kind == TerrainType::Kind::City) {
+                if (d.position[2] > state.terrain.type.city.lock_on_level) {
                     d.lock_on += lock_on_rate * dt;
                     if (d.lock_on >= 1.0f) {
                         d.status = Drone::Status::Crashed;
@@ -444,7 +445,8 @@ float choose_safe_altitude(const Terrain& terr, const Vec<3>& pos, Vec<2> target
     constexpr int n_lookahead = 4;
     constexpr float margin = 5.0f;
     constexpr float min_alt = 10.0f;
-    constexpr float max_alt = Drone::lock_on_level - margin;
+    const float max_alt =
+        terr.type.kind == TerrainType::Kind::City ? terr.type.city.lock_on_level - margin : 1000.0f;
 
     float alt = std::clamp(pos[2], min_alt, max_alt);
 

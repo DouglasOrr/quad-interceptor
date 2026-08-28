@@ -61,8 +61,6 @@ struct Drone {
     enum class Status { Alive, Crashed, Detonated };
     enum class Kind { Player, Enemy };
 
-    inline static constexpr float lock_on_level = 80.0f;
-
     // Identity
     uint id;
     Kind kind;
@@ -89,6 +87,7 @@ struct TerrainType {
         inline static constexpr float skywalk_thickness = 5.0f;
         inline static constexpr float pillar_radius = 1.2f;
 
+        float lock_on_level;
         uint block_size;   // cells
         uint street_size;  // cells
         Vec<2> building_height_range;

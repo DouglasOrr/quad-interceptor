@@ -134,11 +134,11 @@ DroneType DroneType::enemy() {
 }
 
 std::vector<Mission> Mission::all() {
-    DroneType default_player = DroneType::all().front();
     std::vector<Mission> missions;
 
     auto city = TerrainType{.kind = TerrainType::Kind::City,
-                            .city = {.block_size = 10,
+                            .city = {.lock_on_level = 80.0f,
+                                     .block_size = 10,
                                      .street_size = 2,
                                      .building_height_range = {10.0f, 100.0f},
                                      .stilt_prob = 0.3f,
@@ -166,94 +166,59 @@ std::vector<Mission> Mission::all() {
                                                 {-1.0f, -1.0f},
                                                 {-1.0f, 0.0f},
                                                 {0.0f, 0.0f}}};
-    const float city_span = 2.0f * float(city.city.block_size) * Terrain::cell_size;
-    const float plains_span = 20.0f * Terrain::cell_size;
+    DroneType default_player = DroneType::all().front();
+    const TerrainType terrains[] = {city, plains};
+    for (const auto& terrain : terrains) {
+        Mission proto{};
+        proto.terrain_type = terrain;
+        proto.player_type = default_player;
+        proto.player_ai = false;
 
-    Mission sandbox;
-    sandbox.type = Mission::Sandbox;
-    sandbox.name = "sandbox";
-    sandbox.terrain_type = city;
-    sandbox.player_type = default_player;
-    sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
-    sandbox.enemy_spawn_interval = 10.0f;
-    sandbox.max_enemies = 3;
-    sandbox.starting_lives = 0;
-    sandbox.time_limit = 0.0f;
-    sandbox.player_ai = false;
-    missions.push_back(sandbox);
+        Mission sandbox = proto;
+        sandbox.type = Mission::Sandbox;
+        sandbox.name = terrain.kind == TerrainType::Kind::Plains ? "plains/sandbox" : "sandbox";
+        sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
+        sandbox.enemy_spawn_interval = 10.0f;
+        sandbox.max_enemies = 3;
+        missions.push_back(sandbox);
 
-    Mission defense;
-    defense.type = Mission::Defense;
-    defense.name = "defense";
-    defense.terrain_type = city;
-    defense.player_type = default_player;
-    defense.enemy_spawn_radius = 30.0f * Terrain::cell_size;
-    defense.enemy_spawn_interval = 10.0f;
-    defense.max_enemies = 3;
-    defense.starting_lives = 5;
-    defense.time_limit = 0.0f;
-    defense.player_ai = false;
-    defense.objectives = {Circle{city.city.snap_intersection({0, 0}), Terrain::cell_size}};
-    missions.push_back(defense);
+        Mission defense = proto;
+        defense.type = Mission::Defense;
+        defense.name = terrain.kind == TerrainType::Kind::Plains ? "plains/defense" : "defense";
+        defense.enemy_spawn_radius = 30.0f * Terrain::cell_size;
+        defense.enemy_spawn_interval = 10.0f;
+        defense.max_enemies = 3;
+        defense.starting_lives = 5;
+        defense.objectives = {Circle{terrain.kind == TerrainType::Kind::City
+                                         ? terrain.city.snap_intersection({0, 0})
+                                         : Vec<2>{0, 0},
+                                     Terrain::cell_size}};
+        missions.push_back(defense);
 
-    Mission race;
-    race.type = Mission::Race;
-    race.name = "race";
-    race.terrain_type = city;
-    race.player_type = default_player;
-    race.enemy_spawn_radius = 0.0f;
-    race.enemy_spawn_interval = 0.0f;
-    race.max_enemies = 0;
-    race.starting_lives = 0;
-    race.time_limit = 0.0f;
-    race.player_ai = false;
-    for (auto u : circuit) {
-        race.objectives.push_back({city.city.snap_intersection(city_span * u), Terrain::cell_size});
+        Mission race = proto;
+        race.type = Mission::Race;
+        race.name = terrain.kind == TerrainType::Kind::Plains ? "plains/race" : "race";
+        for (auto u : circuit) {
+            const float race_span =
+                terrain.kind == TerrainType::Kind::Plains
+                    ? 20.0f * Terrain::cell_size
+                    : 2.0f * float(terrain.city.block_size) * Terrain::cell_size;
+            const Vec<2> p = race_span * u;
+            race.objectives.push_back(
+                {terrain.kind == TerrainType::Kind::City ? terrain.city.snap_intersection(p) : p,
+                 Terrain::cell_size});
+        }
+        missions.push_back(race);
+
+        Mission chase = proto;
+        chase.type = Mission::Chase;
+        chase.name = terrain.kind == TerrainType::Kind::Plains ? "plains/chase" : "chase";
+        chase.enemy_spawn_radius = 10.0f * Terrain::cell_size;
+        chase.max_enemies = 1;
+        chase.starting_lives = 3;
+        chase.time_limit = 60.0f;
+        missions.push_back(chase);
     }
-    missions.push_back(race);
-
-    Mission chase;
-    chase.type = Mission::Chase;
-    chase.name = "chase";
-    chase.terrain_type = city;
-    chase.player_type = default_player;
-    chase.enemy_spawn_radius = 10.0f * Terrain::cell_size;
-    chase.enemy_spawn_interval = 0.0f;
-    chase.max_enemies = 1;
-    chase.starting_lives = 3;
-    chase.time_limit = 60.0f;
-    chase.player_ai = false;
-    missions.push_back(chase);
-
-    // Plains variants: open ground with scattered poles and a power-line grid.
-    Mission plains_sandbox;
-    plains_sandbox.type = Mission::Sandbox;
-    plains_sandbox.name = "plains/sandbox";
-    plains_sandbox.terrain_type = plains;
-    plains_sandbox.player_type = default_player;
-    plains_sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
-    plains_sandbox.enemy_spawn_interval = 10.0f;
-    plains_sandbox.max_enemies = 3;
-    plains_sandbox.starting_lives = 0;
-    plains_sandbox.time_limit = 0.0f;
-    plains_sandbox.player_ai = false;
-    missions.push_back(plains_sandbox);
-
-    Mission plains_race;
-    plains_race.type = Mission::Race;
-    plains_race.name = "plains/race";
-    plains_race.terrain_type = plains;
-    plains_race.player_type = default_player;
-    plains_race.enemy_spawn_radius = 0.0f;
-    plains_race.enemy_spawn_interval = 0.0f;
-    plains_race.max_enemies = 0;
-    plains_race.starting_lives = 0;
-    plains_race.time_limit = 0.0f;
-    plains_race.player_ai = false;
-    for (auto u : circuit) {
-        plains_race.objectives.push_back({plains_span * u, Terrain::cell_size});
-    }
-    missions.push_back(plains_race);
 
     return missions;
 }
