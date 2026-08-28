@@ -35,25 +35,35 @@ Font Font::load() {
 // GameManager
 
 namespace {
-constexpr float city_blocks(float n) {
-    return n * float(City::block_size) * City::cell_size;
-}
-
 constexpr float respawn_delay = 2.0f;
 constexpr float player_spawn_alt = 5.0f;
 constexpr float enemy_spawn_alt = 20.0f;
-constexpr float sandbox_kill_radius = city_blocks(6);
-constexpr float chase_escape_radius = city_blocks(2.5);
-constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};  // chase (behind, slightly up)
-constexpr float cam_horizon_bias = 0.2f;             // 0 = none; 1 = look fully at z=0 horizon
+constexpr float sandbox_kill_radius = 60.0f * Terrain::cell_size;  // 6 city blocks
+constexpr float chase_escape_radius = 25.0f * Terrain::cell_size;  // 2.5 city blocks
+constexpr Vec<3> cam_offset_vec{-1.2f, 0.0f, 0.5f};                // chase (behind, slightly up)
+constexpr float cam_horizon_bias = 0.2f;  // 0 = none; 1 = look fully at z=0 horizon
+
+Vec<2> spawn_pos(const GameState& s, Vec<2> target) {
+    if (s.terrain.type.kind == TerrainType::Kind::City) {
+        return s.terrain.type.city.snap_intersection(target);
+    }
+    const float range = 3.0f;
+    for (uint i = 0; i < 32; ++i) {  // rejection sample to find an empty cell
+        uint64 h = hash(s.terrain.seed, s.tick, i);
+        Vec<2> jitter = {hash_u(h, 0, -range, range), hash_u(h, 16, -range, range)};
+        Vec<2> candidate = target + Terrain::cell_size * jitter;
+        auto cell = s.terrain(Terrain::nearest_cell(candidate));
+        if (cell.type == Terrain::CellType::Empty) return candidate;
+    }
+    return target;
+}
 
 Vec<3> player_spawn(const GameState& s, const std::optional<Drone>& player) {
     Vec<2> c;
     if (s.mission.type == Mission::Chase && player) {
-        c = City::intersection_center(
-            City::nearest_intersection_block({player->position[0], player->position[1]}));
+        c = spawn_pos(s, {player->position[0], player->position[1]});
     } else if (s.mission.objectives.empty()) {
-        c = City::intersection_center(City::nearest_intersection_block({0.0f, 0.0f}));
+        c = spawn_pos(s, {0.0f, 0.0f});
     } else {
         c = s.mission.objectives[std::max(s.next_objective, 1u) - 1].center;
     }
@@ -127,11 +137,44 @@ std::vector<Mission> Mission::all() {
     DroneType default_player = DroneType::all().front();
     std::vector<Mission> missions;
 
+    auto city = TerrainType{.kind = TerrainType::Kind::City,
+                            .city = {.block_size = 10,
+                                     .street_size = 2,
+                                     .building_height_range = {10.0f, 100.0f},
+                                     .stilt_prob = 0.3f,
+                                     .stilt_podium_range = {1.0f, 40.0f},
+                                     .stilt_gap_range = {5.0f, 20.0f},
+                                     .skywalk_prob = 0.5f,
+                                     .skywalk_height_range = {10.0f, 80.0f}}};
+
+    auto plains = TerrainType{.kind = TerrainType::Kind::Plains,
+                              .plains = {.pole_prob = 0.06f,
+                                         .pole_radius_range = {0.25f, 0.8f},
+                                         .pole_height_range = {4.0f, 14.0f},
+                                         .pylon_run_prob = 0.7f,
+                                         .pylon_row_period = 48,
+                                         .pylon_stride = 4}};
+
+    // Race circuit shape (unit square, 2 blocks to a side), city: snapped to
+    // intersections; plains: raw world positions.
+    constexpr std::array<Vec<2>, 9> circuit = {{{0.0f, 0.0f},
+                                                {0.0f, 1.0f},
+                                                {1.0f, 1.0f},
+                                                {1.0f, 0.0f},
+                                                {1.0f, -1.0f},
+                                                {0.0f, -1.0f},
+                                                {-1.0f, -1.0f},
+                                                {-1.0f, 0.0f},
+                                                {0.0f, 0.0f}}};
+    const float city_span = 2.0f * float(city.city.block_size) * Terrain::cell_size;
+    const float plains_span = 20.0f * Terrain::cell_size;
+
     Mission sandbox;
     sandbox.type = Mission::Sandbox;
     sandbox.name = "sandbox";
+    sandbox.terrain_type = city;
     sandbox.player_type = default_player;
-    sandbox.enemy_spawn_radius = city_blocks(2);
+    sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
     sandbox.enemy_spawn_interval = 10.0f;
     sandbox.max_enemies = 3;
     sandbox.starting_lives = 0;
@@ -142,20 +185,21 @@ std::vector<Mission> Mission::all() {
     Mission defense;
     defense.type = Mission::Defense;
     defense.name = "defense";
+    defense.terrain_type = city;
     defense.player_type = default_player;
-    defense.enemy_spawn_radius = city_blocks(3);
+    defense.enemy_spawn_radius = 30.0f * Terrain::cell_size;
     defense.enemy_spawn_interval = 10.0f;
     defense.max_enemies = 3;
     defense.starting_lives = 5;
     defense.time_limit = 0.0f;
     defense.player_ai = false;
-    defense.objectives = {Circle{
-        City::intersection_center(City::nearest_intersection_block({0, 0})), City::cell_size}};
+    defense.objectives = {Circle{city.city.snap_intersection({0, 0}), Terrain::cell_size}};
     missions.push_back(defense);
 
     Mission race;
     race.type = Mission::Race;
     race.name = "race";
+    race.terrain_type = city;
     race.player_type = default_player;
     race.enemy_spawn_radius = 0.0f;
     race.enemy_spawn_interval = 0.0f;
@@ -163,24 +207,53 @@ std::vector<Mission> Mission::all() {
     race.starting_lives = 0;
     race.time_limit = 0.0f;
     race.player_ai = false;
-    const std::vector<City::Pos> waypoints = {{0, 0},  {0, 2},   {2, 2},  {2, 0}, {2, -2},
-                                              {0, -2}, {-2, -2}, {-2, 0}, {0, 0}};
-    for (auto p : waypoints) {
-        race.objectives.push_back({City::intersection_center(p), City::cell_size});
+    for (auto u : circuit) {
+        race.objectives.push_back({city.city.snap_intersection(city_span * u), Terrain::cell_size});
     }
     missions.push_back(race);
 
     Mission chase;
     chase.type = Mission::Chase;
     chase.name = "chase";
+    chase.terrain_type = city;
     chase.player_type = default_player;
-    chase.enemy_spawn_radius = city_blocks(1);
+    chase.enemy_spawn_radius = 10.0f * Terrain::cell_size;
     chase.enemy_spawn_interval = 0.0f;
     chase.max_enemies = 1;
     chase.starting_lives = 3;
     chase.time_limit = 60.0f;
     chase.player_ai = false;
     missions.push_back(chase);
+
+    // Plains variants: open ground with scattered poles and a power-line grid.
+    Mission plains_sandbox;
+    plains_sandbox.type = Mission::Sandbox;
+    plains_sandbox.name = "plains/sandbox";
+    plains_sandbox.terrain_type = plains;
+    plains_sandbox.player_type = default_player;
+    plains_sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
+    plains_sandbox.enemy_spawn_interval = 10.0f;
+    plains_sandbox.max_enemies = 3;
+    plains_sandbox.starting_lives = 0;
+    plains_sandbox.time_limit = 0.0f;
+    plains_sandbox.player_ai = false;
+    missions.push_back(plains_sandbox);
+
+    Mission plains_race;
+    plains_race.type = Mission::Race;
+    plains_race.name = "plains/race";
+    plains_race.terrain_type = plains;
+    plains_race.player_type = default_player;
+    plains_race.enemy_spawn_radius = 0.0f;
+    plains_race.enemy_spawn_interval = 0.0f;
+    plains_race.max_enemies = 0;
+    plains_race.starting_lives = 0;
+    plains_race.time_limit = 0.0f;
+    plains_race.player_ai = false;
+    for (auto u : circuit) {
+        plains_race.objectives.push_back({plains_span * u, Terrain::cell_size});
+    }
+    missions.push_back(plains_race);
 
     return missions;
 }
@@ -294,15 +367,14 @@ void GameManager::update(GameState& s) {
             if (d.kind == Drone::Kind::Enemy) ++enemy_count;
         });
         if (enemy_count < s.mission.max_enemies) {
-            uint64 h = hash(s.city.seed, s.tick, state->next_drone_id);
+            uint64 h = hash(s.terrain.seed, s.tick, state->next_drone_id);
             float angle = hash_u(h, 0, 0.0f, 2.0f * pi);
             Vec<2> center = s.mission.objectives.empty()
                                 ? Vec<2>{player.position[0], player.position[1]}
                                 : s.mission.objectives[0].center;
             Vec<2> target_pos = {center[0] + s.mission.enemy_spawn_radius * std::cos(angle),
                                  center[1] + s.mission.enemy_spawn_radius * std::sin(angle)};
-            Vec<2> spawn_xy =
-                City::intersection_center(City::nearest_intersection_block(target_pos));
+            Vec<2> spawn_xy = spawn_pos(s, target_pos);
             spawn_drone(state->next_drone_id, s, Drone::Kind::Enemy, DroneType::enemy(),
                         {spawn_xy[0], spawn_xy[1], enemy_spawn_alt});
             state->next_enemy_spawn_tick = 0;
@@ -341,6 +413,7 @@ void game_loop(Window& window, const Mission& mission) {
     GameState state{};
     state.mission = mission;
     state.lives = state.mission.starting_lives;
+    state.terrain.type = state.mission.terrain_type;
     GameManager game_manager;
     game_manager.update(state);
     AI ai;

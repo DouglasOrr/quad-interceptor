@@ -488,11 +488,13 @@ struct PhongMaterial {
 
 // Scene constants.
 constexpr float fov_deg = 100.0f;
-constexpr int city_radius = 60;  // cells rendered around the player in each direction
+constexpr int view_radius = 60;  // cells rendered around the player in each direction
 constexpr Vec<3> light_dir{0.40f, 0.55f, 0.73f};  // world-space direction toward the sun
 constexpr Vec<3> fog_color{0.15f, 0.15f, 0.2f};
-constexpr float fog_end = float(city_radius) * City::cell_size;
+constexpr float fog_end = float(view_radius) * Terrain::cell_size;
 constexpr float fog_start = fog_end * 0.5f;
+constexpr Vec<3> city_floor_color{0.15f, 0.15f, 0.15f};
+constexpr Vec<3> plains_floor_color{0.10f, 0.16f, 0.08f};
 constexpr int minimap_cells = 25;  // radar radius, in street cells
 constexpr float minimap_size_ratio = 0.25f;
 constexpr float attitude_size_ratio = 0.15f;
@@ -531,6 +533,11 @@ struct MinimapView {
     Uniform g_band_half;
     Mesh grid;
 
+    GlProgram marker_program;
+    Uniform mk_mvp;
+    Uniform mk_radius;
+    Mesh markers;
+
     MinimapView() {
         const char* v_src = R"(
 #version 330 core
@@ -564,6 +571,33 @@ void main(){
   gl_Position = u_mvp * vec4(p, 0.0, 1.0);
 }
 )";
+        const char* marker_v_src = R"(
+#version 330 core
+layout(location=0) in vec2 pos;
+layout(location=1) in vec2 inst_pos;    // world-relative marker center
+layout(location=2) in float inst_scale;
+layout(location=3) in vec3 inst_color;
+uniform mat4 u_mvp;
+out vec2 v_local;
+out vec3 v_color;
+void main(){
+  vec2 p = inst_scale * pos + inst_pos;
+  v_local = p;
+  v_color = inst_color;
+  gl_Position = u_mvp * vec4(p, 0.0, 1.0);
+}
+)";
+        const char* marker_f_src = R"(
+#version 330 core
+in vec2 v_local;
+in vec3 v_color;
+uniform float u_radius;
+out vec4 frag;
+void main(){
+  if (dot(v_local, v_local) > u_radius * u_radius) discard;
+  frag = vec4(v_color, 1.0);
+}
+)";
         const char* f_src = R"(
 #version 330 core
 in vec2 v_local;
@@ -594,6 +628,10 @@ void main(){
         g_radius = grid_program.uniform("u_radius");
         g_band_half = grid_program.uniform("u_band_half");
 
+        marker_program = GlProgram(marker_v_src, marker_f_src);
+        mk_mvp = marker_program.uniform("u_mvp");
+        mk_radius = marker_program.uniform("u_radius");
+
         std::vector<float> disc_verts = {0.0f, 0.0f};
         constexpr int n_seg = 64;  // circle smoothness
         for (int i = 0; i <= n_seg; ++i) {
@@ -617,6 +655,16 @@ void main(){
         grid.vertex_count = 6;
         grid.add({.data = QUAD2C, .bytes = sizeof(QUAD2C), .loc = 0, .comps = 2});
         grid.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 2, .divisor = true});
+
+        markers.mode = GL_TRIANGLE_FAN;
+        markers.vertex_count = disc.vertex_count;
+        markers.add({.data = disc_verts.data(),
+                     .bytes = static_cast<GLsizeiptr>(disc_verts.size() * sizeof(float)),
+                     .loc = 0,
+                     .comps = 2});
+        markers.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 2, .divisor = true});
+        markers.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 1, .divisor = true});
+        markers.add({.data = nullptr, .bytes = 0, .loc = 3, .comps = 3, .divisor = true});
     }
 
     void draw(const GameState& s) {
@@ -625,7 +673,7 @@ void main(){
         const float min_dim = std::min(float(vp[2]), float(vp[3]));
         const int minimap_size = int(min_dim * minimap_size_ratio);
         const int pad = int(min_dim * hud_pad_ratio);
-        const float R = City::cell_size * minimap_cells;
+        const float R = Terrain::cell_size * minimap_cells;
 
         const auto& player = player_drone(s);
         const Vec<3>& p = player.position;
@@ -652,33 +700,93 @@ void main(){
         };
         draw_disc(R, {0.0f, 0.0f}, {0.04f, 0.06f, 0.10f});
 
-        // Street grid: one 2*street_size-wide street per block, at its low edge
-        // (ox|oy in [0,street_size)). Street center within a block is at the
-        // midpoint of the street cells, i.e. 0.5*street_size*cell from the block
-        // origin -- so a drone sitting on an intersection center maps to (0,0).
-        grid_program.use();
-        {
-            const float cell = City::cell_size;
-            const float block_w = float(City::block_size) * cell;
-            const float band_half = 0.5f * float(City::street_size) * cell;
-            std::vector<float> bands;  // (center, axis) per band
-            const int nx0 = int(std::floor((p[0] - R) / block_w)) - 1;
-            const int nx1 = int(std::ceil((p[0] + R) / block_w)) + 1;
-            for (int n = nx0; n <= nx1; ++n)
-                bands.insert(bands.end(), {n * block_w + band_half - p[0], 0.0f});
-            const int ny0 = int(std::floor((p[1] - R) / block_w)) - 1;
-            const int ny1 = int(std::ceil((p[1] + R) / block_w)) + 1;
-            for (int m = ny0; m <= ny1; ++m)
-                bands.insert(bands.end(), {m * block_w + band_half - p[1], 1.0f});
-            grid.buffers[1].upload(bands, GL_DYNAMIC_DRAW);
+        if (s.terrain.type.kind == TerrainType::Kind::City) {
+            // Street grid: one 2*street_size-wide street per block, at its low edge
+            // (ox|oy in [0,street_size)). Street center within a block is at the
+            // midpoint of the street cells, i.e. 0.5*street_size*cell from the block
+            // origin -- so a drone sitting on an intersection center maps to (0,0).
+            grid_program.use();
+            {
+                const float cell = Terrain::cell_size;
+                const float block_w = float(s.terrain.type.city.block_size) * cell;
+                const float band_half = 0.5f * float(s.terrain.type.city.street_size) * cell;
+                std::vector<float> bands;  // (center, axis) per band
+                const int nx0 = int(std::floor((p[0] - R) / block_w)) - 1;
+                const int nx1 = int(std::ceil((p[0] + R) / block_w)) + 1;
+                for (int n = nx0; n <= nx1; ++n)
+                    bands.insert(bands.end(), {n * block_w + band_half - p[0], 0.0f});
+                const int ny0 = int(std::floor((p[1] - R) / block_w)) - 1;
+                const int ny1 = int(std::ceil((p[1] + R) / block_w)) + 1;
+                for (int m = ny0; m <= ny1; ++m)
+                    bands.insert(bands.end(), {m * block_w + band_half - p[1], 1.0f});
+                grid.buffers[1].upload(bands, GL_DYNAMIC_DRAW);
 
-            g_mvp.set(mvp);
-            g_radius.set(R);
-            g_band_half.set(band_half);
-            g_color.set(Vec<3>{0.08f, 0.12f, 0.15f});
-            g_alpha.set(1.0f);
-            grid.instance_count = static_cast<GLsizei>(bands.size() / 2);
-            grid.draw();
+                g_mvp.set(mvp);
+                g_radius.set(R);
+                g_band_half.set(band_half);
+                g_color.set(Vec<3>{0.08f, 0.12f, 0.15f});
+                g_alpha.set(1.0f);
+                grid.instance_count = static_cast<GLsizei>(bands.size() / 2);
+                grid.draw();
+            }
+        } else {
+            // Pylons grid
+            grid_program.use();
+            {
+                const float cell = Terrain::cell_size;
+                const float lane_period = float(s.terrain.type.plains.pylon_row_period) * cell;
+                std::vector<float> bands;  // (center, axis) per lane
+                // A run row/col occupies cells [n*period, (n*period)+1), so its
+                // center is half a cell beyond the lattice line itself.
+                const float lane_half = 0.5f * cell;
+                const int nx0 = int(std::floor((p[0] - R) / lane_period)) - 1;
+                const int nx1 = int(std::ceil((p[0] + R) / lane_period)) + 1;
+                for (int n = nx0; n <= nx1; ++n)
+                    bands.insert(bands.end(), {n * lane_period + lane_half - p[0], 0.0f});
+                const int ny0 = int(std::floor((p[1] - R) / lane_period)) - 1;
+                const int ny1 = int(std::ceil((p[1] + R) / lane_period)) + 1;
+                for (int m = ny0; m <= ny1; ++m)
+                    bands.insert(bands.end(), {m * lane_period + lane_half - p[1], 1.0f});
+                grid.buffers[1].upload(bands, GL_DYNAMIC_DRAW);
+
+                g_mvp.set(mvp);
+                g_radius.set(R);
+                g_band_half.set(lane_half);
+                g_color.set(Vec<3>{0.07f, 0.11f, 0.08f});
+                g_alpha.set(1.0f);
+                grid.instance_count = static_cast<GLsizei>(bands.size() / 2);
+                grid.draw();
+            }
+
+            // Pole/pylon footprint dots
+            program.use();
+            std::vector<float> mk_pos, mk_scale, mk_color;
+            const int64 cx0 = int64(std::floor((p[0] - R) / Terrain::cell_size));
+            const int64 cx1 = int64(std::floor((p[0] + R) / Terrain::cell_size));
+            const int64 cy0 = int64(std::floor((p[1] - R) / Terrain::cell_size));
+            const int64 cy1 = int64(std::floor((p[1] + R) / Terrain::cell_size));
+            for (int64 cy = cy0; cy <= cy1; ++cy) {
+                for (int64 cx = cx0; cx <= cx1; ++cx) {
+                    auto c = s.terrain({cx, cy});
+                    if (c.type != Terrain::CellType::Pole) continue;
+                    auto center = Terrain::cell_center({cx, cy});
+                    bool pylon = c.pole.pylon_x || c.pole.pylon_y;
+                    Vec<3> color = pylon ? Vec<3>{0.45f, 0.5f, 0.55f} : Vec<3>{0.35f, 0.4f, 0.28f};
+                    mk_pos.insert(mk_pos.end(), {center[0] - p[0], center[1] - p[1]});
+                    mk_scale.push_back(pylon ? 5.0f : 2.0f);
+                    mk_color.insert(mk_color.end(), {color[0], color[1], color[2]});
+                }
+            }
+            markers.instance_count = static_cast<GLsizei>(mk_pos.size() / 2);
+            if (markers.instance_count) {
+                markers.buffers[1].upload(mk_pos, GL_DYNAMIC_DRAW);
+                markers.buffers[2].upload(mk_scale, GL_DYNAMIC_DRAW);
+                markers.buffers[3].upload(mk_color, GL_DYNAMIC_DRAW);
+                marker_program.use();
+                mk_mvp.set(mvp);
+                mk_radius.set(R);
+                markers.draw();
+            }
         }
         program.use();
         u_alpha.set(1.0f);
@@ -982,8 +1090,118 @@ struct FpsView {
     }
 };
 
-// Instanced city geometry (buildings + floor tiles)
-struct CityView {
+// Sagging power lines between consecutive pylons on a run (plains). One
+// instance per conductor (endpoints A -> B); the sag curve is evaluated in the
+// vertex shader. Spans are emitted by the terrain view's cell loop; geometry
+// uploads once per rebuild.
+struct WiresView {
+    static constexpr int segs_per_span = 8;
+
+    GlProgram program;
+    Uniform u_mvp;
+    Uniform u_cam_pos;
+    Uniform u_fog_color;
+    Uniform u_fog_range;
+    Mesh mesh;
+    std::vector<float> ends_a;  // attach point on the previous pylon, per conductor
+    std::vector<float> ends_b;  // attach point on this pylon, per conductor
+
+    WiresView() {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in float t;      // curve parameter, [0,1]
+layout(location=1) in vec3 inst_a;  // attach point on the previous pylon
+layout(location=2) in vec3 inst_b;  // attach point on this pylon
+uniform mat4 u_mvp;
+out vec3 v_world;
+void main(){
+  float sag = 0.08 * distance(inst_a, inst_b);
+  vec3 mid = vec3(0.5 * (inst_a.x + inst_b.x), 0.5 * (inst_a.y + inst_b.y),
+                  min(inst_a.z, inst_b.z) - sag);
+  float u = 1.0 - t;
+  vec3 p = u * u * inst_a + 2.0 * u * t * mid + t * t * inst_b;
+  gl_Position = u_mvp * vec4(p, 1.0);
+  v_world = p;
+}
+)";
+        const char* f_src = R"(
+#version 330 core
+in vec3 v_world;
+uniform vec3 u_cam_pos;
+uniform vec3 u_fog_color;
+uniform vec2 u_fog_range;
+out vec4 frag;
+void main(){
+  float dist = length(u_cam_pos - v_world);
+  float fog = clamp((dist - u_fog_range.x) / (u_fog_range.y - u_fog_range.x), 0.0, 1.0);
+  frag = vec4(mix(vec3(0.05, 0.05, 0.07), u_fog_color, fog), 1.0);
+}
+)";
+        program = GlProgram(v_src, f_src);
+        u_mvp = program.uniform("u_mvp");
+        u_cam_pos = program.uniform("u_cam_pos");
+        u_fog_color = program.uniform("u_fog_color");
+        u_fog_range = program.uniform("u_fog_range");
+
+        std::vector<float> ts;
+        for (int i = 0; i < segs_per_span; ++i) {
+            float t0 = float(i) / float(segs_per_span);
+            float t1 = float(i + 1) / float(segs_per_span);
+            ts.insert(ts.end(), {t0, t1});
+        }
+        mesh.mode = GL_LINES;
+        mesh.vertex_count = static_cast<GLsizei>(ts.size());
+        mesh.add({.data = ts.data(),
+                  .bytes = static_cast<GLsizeiptr>(ts.size() * sizeof(float)),
+                  .loc = 0,
+                  .comps = 1});
+        mesh.add({.data = nullptr, .bytes = 0, .loc = 1, .comps = 3, .divisor = true});
+        mesh.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
+    }
+
+    // Conductors from pylon `prev` to pylon `cur`; no-op unless both cells are
+    // pylons on the same run (per `along_x`).
+    void span(const Terrain& terr, Terrain::Pos cur, Terrain::Pos prev, bool along_x) {
+        auto a = terr(cur);
+        auto b = terr(prev);
+        auto on_run = [&](const Terrain::PoleData& p) { return along_x ? p.pylon_x : p.pylon_y; };
+        if (a.type != Terrain::CellType::Pole || !on_run(a.pole)) return;
+        if (b.type != Terrain::CellType::Pole || !on_run(b.pole)) return;
+        auto cc = Terrain::cell_center(cur);
+        auto cp = Terrain::cell_center(prev);
+        Vec<3> A{cp[0], cp[1], b.pole.top - 2.0f};
+        Vec<3> B{cc[0], cc[1], a.pole.top - 2.0f};
+        if (length(B - A) < 1.0f) return;
+        Vec<2> perp = along_x ? Vec<2>{0.0f, 1.0f} : Vec<2>{1.0f, 0.0f};
+        for (float w : {-0.9f, 0.0f, 0.9f}) {  // three parallel conductors
+            Vec<3> a2 = A + Vec<3>{perp[0] * w, perp[1] * w, 0.0f};
+            Vec<3> b2 = B + Vec<3>{perp[0] * w, perp[1] * w, 0.0f};
+            ends_a.insert(ends_a.end(), {a2[0], a2[1], a2[2]});
+            ends_b.insert(ends_b.end(), {b2[0], b2[1], b2[2]});
+        }
+    }
+
+    void upload() {
+        mesh.instance_count = static_cast<GLsizei>(ends_a.size() / 3);
+        if (mesh.instance_count > 0) {
+            mesh.buffers[1].upload(ends_a, GL_DYNAMIC_DRAW);
+            mesh.buffers[2].upload(ends_b, GL_DYNAMIC_DRAW);
+        }
+    }
+
+    void draw(const Mat4& view_projection_mat, const Vec<3>& eye) const {
+        if (mesh.instance_count <= 0) return;
+        program.use();
+        u_mvp.set(view_projection_mat);
+        u_cam_pos.set(eye);
+        u_fog_color.set(fog_color);
+        u_fog_range.set(Vec<2>{fog_start, fog_end});
+        mesh.draw();
+    }
+};
+
+// Instanced terrain geometry (buildings, floor tiles, poles)
+struct TerrainView {
     GlProgram program;
     Uniform u_mvp;
     Uniform u_light_dir;
@@ -993,6 +1211,7 @@ struct CityView {
     Mesh floor;
     Mesh buildings;
     Mesh pillars;
+    WiresView wires;
     PhongMaterial floor_mat{.ambient = grey(0.1),
                             .diffuse = grey(0.9),
                             .specular = grey(0.1),
@@ -1004,7 +1223,7 @@ struct CityView {
     int64 anchor_x = INT64_MAX;
     int64 anchor_y = INT64_MAX;
 
-    CityView() {
+    TerrainView() {
         const char* v_src = R"(
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -1038,7 +1257,7 @@ void main(){
         buildings.add({.data = nullptr, .bytes = 0, .loc = 2, .comps = 3, .divisor = true});
         buildings.add({.data = nullptr, .bytes = 0, .loc = 3, .comps = 3, .divisor = true});
 
-        auto pillar_verts = make_cylinder(20, /*caps*/ false);
+        auto pillar_verts = make_cylinder(20, /*caps*/ true);
         pillars.mode = GL_TRIANGLES;
         pillars.vertex_count = static_cast<GLsizei>(pillar_verts.size());
         pillars.instance_count = 0;
@@ -1060,8 +1279,9 @@ void main(){
     }
 
     void draw(const GameState& s, const Mat4& view_projection_mat, const Vec<3>& eye) {
-        const City& city = s.city;
-        const float cell = city.cell_size;
+        const Terrain& terr = s.terrain;
+        const TerrainType& tt = terr.type;
+        const float cell = Terrain::cell_size;
         const Drone& player = player_drone(s);
         const int64 ax = static_cast<int64>(std::floor(player.position[0] / cell));
         const int64 ay = static_cast<int64>(std::floor(player.position[1] / cell));
@@ -1071,41 +1291,51 @@ void main(){
             std::vector<float> floor_pos, floor_scale, floor_color;
             std::vector<float> buildings_pos, buildings_scale, buildings_color;
             std::vector<float> pillars_pos, pillars_scale, pillars_color;
-            for (int64 dy = -city_radius; dy <= city_radius; ++dy) {
-                for (int64 dx = -city_radius; dx <= city_radius; ++dx) {
-                    auto c = city({ax + dx, ay + dy});
+            wires.ends_a.clear();
+            wires.ends_b.clear();
+
+            for (int64 dy = -view_radius; dy <= view_radius; ++dy) {
+                for (int64 dx = -view_radius; dx <= view_radius; ++dx) {
+                    auto c = terr({ax + dx, ay + dy});
                     float wx = float(ax + dx) * cell;
                     float wy = float(ay + dy) * cell;
-                    if (c.height) {
-                        float shade = hash_u(c.hash, 32, 0.2f, 0.4f);
-                        buildings_pos.insert(buildings_pos.end(), {wx, wy, c.base});
-                        buildings_scale.insert(buildings_scale.end(),
-                                               {cell, cell, c.height - c.base});
-                        buildings_color.insert(buildings_color.end(), {shade, shade, shade});
-                        if (c.podium) {
-                            // Podium
-                            buildings_pos.insert(buildings_pos.end(), {wx, wy, 0.0f});
-                            buildings_scale.insert(buildings_scale.end(), {cell, cell, c.podium});
+                    switch (c.type) {
+                        case Terrain::CellType::Building: {
+                            const auto& b = c.building;
+                            float shade = hash_u(c.hash, 32, 0.2f, 0.4f);
+                            buildings_pos.insert(buildings_pos.end(), {wx, wy, b.base});
+                            buildings_scale.insert(buildings_scale.end(),
+                                                   {cell, cell, b.top - b.base});
                             buildings_color.insert(buildings_color.end(), {shade, shade, shade});
-                            // Stilts
-                            constexpr float pr = City::stilt_pillar_radius;
-                            pillars_pos.insert(
-                                pillars_pos.end(),
-                                {wx + 0.5f * cell - pr, wy + 0.5f * cell - pr, c.podium});
-                            pillars_scale.insert(pillars_scale.end(),
-                                                 {2.0f * pr, 2.0f * pr, c.base - c.podium});
-                            pillars_color.insert(pillars_color.end(), {0.35f, 0.35f, 0.4f});
+                            if (b.podium > 0.0f) {
+                                // Podium
+                                buildings_pos.insert(buildings_pos.end(), {wx, wy, 0.0f});
+                                buildings_scale.insert(buildings_scale.end(),
+                                                       {cell, cell, b.podium});
+                                buildings_color.insert(buildings_color.end(),
+                                                       {shade, shade, shade});
+                                // Stilts
+                                const float pr = TerrainType::City::pillar_radius;
+                                pillars_pos.insert(
+                                    pillars_pos.end(),
+                                    {wx + 0.5f * cell - pr, wy + 0.5f * cell - pr, b.podium});
+                                pillars_scale.insert(pillars_scale.end(),
+                                                     {2.0f * pr, 2.0f * pr, b.base - b.podium});
+                                pillars_color.insert(pillars_color.end(), {0.35f, 0.35f, 0.4f});
+                            }
+                            break;
                         }
-                    } else {
-                        floor_pos.insert(floor_pos.end(), {wx, wy, 0.0f});
-                        floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
-                        floor_color.insert(floor_color.end(), {0.15f, 0.15f, 0.15f});
-                        if (c.skywalk_height > 0.0f) {
+                        case Terrain::CellType::Skywalk: {
+                            floor_pos.insert(floor_pos.end(), {wx, wy, 0.0f});
+                            floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
+                            const Vec<3>& g = tt.kind == TerrainType::Kind::Plains
+                                                  ? plains_floor_color
+                                                  : city_floor_color;
+                            floor_color.insert(floor_color.end(), {g[0], g[1], g[2]});
                             float shade = hash_u(c.hash, 32, 0.25f, 0.45f);
-                            constexpr float T = City::skywalk_thickness;
-                            auto [ox, oy] = City::block_offset({ax + dx, ay + dy});
+                            const float T = TerrainType::City::skywalk_thickness;
                             float sx, sy, px, py;
-                            if (ox < int64(City::street_size) && oy >= int64(City::street_size)) {
+                            if (c.skywalk.axis_x) {
                                 sx = cell;
                                 sy = T;
                                 px = wx;
@@ -1116,11 +1346,50 @@ void main(){
                                 px = wx + 0.5f * (cell - T);
                                 py = wy;
                             }
-                            buildings_pos.insert(buildings_pos.end(), {px, py, c.skywalk_height});
+                            buildings_pos.insert(buildings_pos.end(), {px, py, c.skywalk.bottom});
                             buildings_scale.insert(buildings_scale.end(), {sx, sy, T});
                             buildings_color.insert(buildings_color.end(),
                                                    {shade * 0.9f, shade * 1.0f, shade * 1.1f});
+                            break;
                         }
+                        case Terrain::CellType::Pole: {
+                            floor_pos.insert(floor_pos.end(), {wx, wy, 0.0f});
+                            floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
+                            const Vec<3>& g = tt.kind == TerrainType::Kind::Plains
+                                                  ? plains_floor_color
+                                                  : city_floor_color;
+                            floor_color.insert(floor_color.end(), {g[0], g[1], g[2]});
+                            const float r = c.pole.radius;
+                            pillars_pos.insert(pillars_pos.end(),
+                                               {wx + 0.5f * cell - r, wy + 0.5f * cell - r, 0.0f});
+                            pillars_scale.insert(pillars_scale.end(),
+                                                 {2.0f * r, 2.0f * r, c.pole.top});
+                            const Vec<3> pole_col = (c.pole.pylon_x || c.pole.pylon_y)
+                                                        ? Vec<3>{0.32f, 0.34f, 0.40f}
+                                                        : Vec<3>{0.48f, 0.42f, 0.34f};
+                            pillars_color.insert(pillars_color.end(),
+                                                 {pole_col[0], pole_col[1], pole_col[2]});
+                            if (tt.kind == TerrainType::Kind::Plains &&
+                                (c.pole.pylon_x || c.pole.pylon_y)) {
+                                Terrain::Pos here = {ax + dx, ay + dy};
+                                const int64 stride = int64(tt.plains.pylon_stride);
+                                if (c.pole.pylon_x)
+                                    wires.span(terr, here, {here[0] - stride, here[1]},
+                                               /*along_x*/ true);
+                                if (c.pole.pylon_y)
+                                    wires.span(terr, here, {here[0], here[1] - stride},
+                                               /*along_x*/ false);
+                            }
+                            break;
+                        }
+                        case Terrain::CellType::Empty:
+                            floor_pos.insert(floor_pos.end(), {wx, wy, 0.0f});
+                            floor_scale.insert(floor_scale.end(), {cell, cell, 0.0f});
+                            const Vec<3>& g = tt.kind == TerrainType::Kind::Plains
+                                                  ? plains_floor_color
+                                                  : city_floor_color;
+                            floor_color.insert(floor_color.end(), {g[0], g[1], g[2]});
+                            break;
                     }
                 }
             }
@@ -1136,6 +1405,7 @@ void main(){
             pillars.buffers[1].upload(pillars_pos, GL_DYNAMIC_DRAW);
             pillars.buffers[2].upload(pillars_scale, GL_DYNAMIC_DRAW);
             pillars.buffers[3].upload(pillars_color, GL_DYNAMIC_DRAW);
+            wires.upload();
         }
         if (floor.instance_count > 0) {
             program.use();
@@ -1167,6 +1437,7 @@ void main(){
             u_fog_range.set(Vec<2>{fog_start, fog_end});
             pillars.draw();
         }
+        wires.draw(view_projection_mat, eye);
     }
 };
 
@@ -1563,7 +1834,7 @@ struct Renderer::State {
     Uniform u_mvp;
     Uniform u_color;
 
-    CityView city;
+    TerrainView terrain;
     DroneView drone;
     ObjectiveView objective;
     MinimapView minimap;
@@ -1600,7 +1871,7 @@ void Renderer::draw(const GameState& s, float dt) {
     Mat4 view_projection_mat = mul(state->projection, view_mat);
 
     // Scene
-    state->city.draw(s, view_projection_mat, s.camera_pos);
+    state->terrain.draw(s, view_projection_mat, s.camera_pos);
     state->drone.draw(s, view_projection_mat, s.camera_pos, dt);
     state->objective.draw(s, view_projection_mat);
 

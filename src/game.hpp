@@ -81,40 +81,93 @@ struct Drone {
     Vec<4> motor_speed;  // (FL, FR, BL, BR) in [0, 1]
 };
 
-struct City {
-    using Pos = std::array<int64, 2>;
+struct TerrainType {
+    enum class Kind : std::uint8_t { City, Plains };
 
-    // A cell can be:
-    //   street (height=base=podium=0)
-    //   tower: solid podium [0, podium], sparse stilts [podium, base], top [base, height]
-    struct Cell {
-        float height;          // cell top altitude
-        float base;            // block-common stilt-top altitude
-        float podium;          // block-common lower floors altitude
-        float skywalk_height;  // 0=no skywalk, >0=bottom altitude of skywalk
-        uint64 hash;
+    // City: blocks of towers, some with "stilt" gaps and skywalks.
+    struct City {
+        inline static constexpr float skywalk_thickness = 5.0f;
+        inline static constexpr float pillar_radius = 1.2f;
+
+        uint block_size;   // cells
+        uint street_size;  // cells
+        Vec<2> building_height_range;
+        float stilt_prob;
+        Vec<2> stilt_podium_range;
+        Vec<2> stilt_gap_range;
+        float skywalk_prob;
+        Vec<2> skywalk_height_range;
+
+        Vec<2> snap_intersection(Vec<2> v) const;
     };
 
-    inline static constexpr float cell_size = 15.0f;
-    inline static constexpr uint block_size = 10;  // cells per city block (street grid period)
-    inline static constexpr uint street_size = 2;  // street width, in cells (each block edge)
-    inline static constexpr float skywalk_thickness = 5.0f;
-    inline static constexpr float stilt_pillar_radius = 1.2f;
+    // Plains: open ground with scattered poles and a power-line pylon grid.
+    struct Plains {
+        inline static constexpr float pylon_radius = 1.3f;
+        inline static constexpr float pylon_height = 45.0f;
+
+        float pole_prob;
+        Vec<2> pole_radius_range;
+        Vec<2> pole_height_range;
+        float pylon_run_prob;
+        uint pylon_row_period;
+        uint pylon_stride;
+    };
+
+    Kind kind;
+    union {
+        City city;
+        Plains plains;
+    };
+};
+
+struct Terrain {
+    enum class CellType : std::uint8_t { Empty, Building, Skywalk, Pole };
+
+    struct BuildingData {
+        float top;     // tower [base, top]
+        float base;    // stilts [podium, base]
+        float podium;  // lower floors [0, podium]
+    };
+    struct SkywalkData {
+        float bottom;
+        bool axis_x;
+    };
+    struct PoleData {
+        float radius;
+        float top;
+        bool pylon_x;  // horizontal power-line run
+        bool pylon_y;  // vertical power-line run
+    };
+
+    struct Cell {
+        CellType type;
+        uint64 hash;
+        union {
+            struct {
+            } empty;
+            BuildingData building;
+            SkywalkData skywalk;
+            PoleData pole;
+        };
+    };
+    using Pos = std::array<int64, 2>;
 
     int64 seed;
+    TerrainType type;
+
     Cell operator()(Pos p) const;
-    static Pos block_index(Pos p);
-    static Pos block_offset(Pos p);
+
+    inline static constexpr float cell_size = 15.0f;
     static Pos nearest_cell(Vec<2> v);
     static Vec<2> cell_center(Pos p);
-    static Pos nearest_intersection_block(Vec<2> v);
-    static Vec<2> intersection_center(Pos block);
 };
 
 struct Mission {
     enum Type { Defense, Sandbox, Race, Chase };
     Type type;
     std::string name;
+    TerrainType terrain_type;
     DroneType player_type;
     std::vector<Circle> objectives;  // empty in sandbox
     float enemy_spawn_radius;        // around objective (defense) or player (sandbox, chase)
@@ -132,7 +185,7 @@ struct GameState {
     std::vector<Drone> drones;
     Vec<3> camera_pos;
     Quat camera_orientation;
-    City city;
+    Terrain terrain;
     Mission mission;
     // Mission state
     uint lives;
