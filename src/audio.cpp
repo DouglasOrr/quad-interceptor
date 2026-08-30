@@ -78,8 +78,10 @@ struct Effects {
 
         float dt = static_cast<float>(game_state.tick - prev_tick) * Physics::dt;
         prev_tick = game_state.tick;
-        cam_vel = (1.0f / dt) * (game_state.camera_pos - prev_cam_pos);
-        prev_cam_pos = game_state.camera_pos;
+        if (dt > 0.0f) {
+            cam_vel = (1.0f / dt) * (game_state.camera_pos - prev_cam_pos);
+            prev_cam_pos = game_state.camera_pos;
+        }
 
         sync_parallel(
             game_state.drones, drones,
@@ -276,18 +278,20 @@ struct Music {
         float t = 1e3f;
         float freq = 0;
         float duration = 1.0f;
+        float velocity = 1.0f;
         float lp_state = 0;
 
-        void play(float f, float dur) {
+        void play(float f, float dur, float vel) {
             freq = f;
             duration = dur;
+            velocity = vel;
             t = 0;
         }
 
         float operator()() {
-            auto amp = attack_decay(t, 0.01f, duration);
+            auto amp = attack_decay(t, 0.01f, duration) * (0.5f + 0.5f * velocity);
             auto wave = osc(freq);
-            float cutoff = std::max(1.0f, 600.0f * (1 - t / duration));
+            float cutoff = std::max(10.0f, 600.0f * (1 - t / duration) * velocity);
             float lp_a = 1.0f - std::exp(-2 * pi * cutoff * inv_sample_rate);
             lp_state += lp_a * (wave - lp_state);
             t += inv_sample_rate;
@@ -298,33 +302,39 @@ struct Music {
     struct Note {
         float freq;
         float duration;
+        float velocity;
     };
 
     static constexpr uint sub_beats = 16u;
     static constexpr uint sec_bars = 4u;
     static constexpr std::array<int, 8> minor_semitones = {0, 2, 3, 5, 7, 8, 10, 12};
     static constexpr float base_freq_A2 = 220.0f;
-    static constexpr uint subbpm = 180;
-    static constexpr uint period = (sample_rate * 60) / subbpm;
-    static constexpr float sub_time = inv_sample_rate * period;
-    static constexpr float bar_time = sub_beats * sub_time;
-    static constexpr uint bass_octave_shift = 2;
+    static constexpr uint bass_octave_shift = 1;
 
+    // State
     ulong sample_seed = 0;
     uint phase = 0;
     uint beat_in_bar = 0;
     uint bar_in_sec = 0;
+
     // Instruments
     Kick kick;
     Hat hat;
     std::array<Pad, 3> pads;
     Bass bass;
-    // Tracks
+
+    // Tempo & Scale
+    uint period;
+    float sub_time;
+    float bar_time;
     std::array<float, 8> scale{};
+
+    // Tracks
     std::array<bool, sub_beats> kick_track{};
     std::array<bool, sub_beats> hat_track{};
     std::array<std::optional<Note>, sec_bars * sub_beats> bass_track{};
     std::array<std::array<float, 3>, sec_bars> pad_track{};
+
     // Section
     bool kick_hat_on = true;
     bool bass_on = true;
@@ -333,13 +343,21 @@ struct Music {
     explicit Music() { reset(0); }
 
     void reset(uint seed) {
-        phase = beat_in_bar = bar_in_sec = 0;
+        // Tempo & Scale
+        auto subbpm = 160u + uint(hash_u(hash(seed, 0x5a4a2a05), 0, 0.0f, 80.0f));
+        period = (sample_rate * 60) / subbpm;
+        sub_time = inv_sample_rate * float(period);
+        bar_time = sub_beats * sub_time;
         {
             auto h = hash(seed);
             auto base_freq = base_freq_A2 * std::pow(2.0f, float(h % 12) / 12.0f) / 2;
             for (auto i = 0u; i < scale.size(); ++i)
                 scale[i] = base_freq * std::pow(2.0f, float(minor_semitones[i]) / 12.0f);
         }
+
+        // State
+        phase = beat_in_bar = bar_in_sec = 0;
+
         // kick & hat
         kick_track.fill(false);
         hat_track.fill(false);
@@ -354,7 +372,7 @@ struct Music {
         {
             auto last_note = 0u;
             bass_track.fill(std::nullopt);
-            bass_track[0] = {scale[0] / (1 << bass_octave_shift), sub_time};
+            bass_track[0] = {scale[0] / (1 << bass_octave_shift), sub_time, 1.0f};
             pad_track.fill(chord(0));
             auto pad_generated = 0u;
             for (auto i = 1u; i < sec_bars * sub_beats; i += 1) {
@@ -377,7 +395,8 @@ struct Music {
                     } else {
                         note = (last_note + 1) % 8;
                     }
-                    bass_track[i] = {scale[note] / (1 << bass_octave_shift), sub_time};
+                    bass_track[i] = {scale[note] / (1 << bass_octave_shift), sub_time,
+                                     hash_u(h, 48, 0.7f, 1.0f)};
                     last_note = note;
                     if (pad_generated < bar) {
                         pad_track[bar] = chord(note);
@@ -430,10 +449,10 @@ struct Music {
                 if (beat_in_bar == 0 && bar_in_sec == 0) {
                     sample_section();
                 }
-                if (kick_track[beat_in_bar]) kick.play(beat_in_bar == 0 ? 1.0f : 0.5f);
+                if (kick_track[beat_in_bar]) kick.play(beat_in_bar == 0 ? 1.0f : 0.6f);
                 if (hat_track[beat_in_bar]) hat.play();
                 if (auto b = bass_track[bar_in_sec * sub_beats + beat_in_bar]) {
-                    bass.play(b->freq, b->duration);
+                    bass.play(b->freq, b->duration, b->velocity);
                 }
                 if (beat_in_bar == 0) {
                     for (auto i = 0u; i < pads.size(); ++i) {
@@ -442,11 +461,11 @@ struct Music {
                 }
             }
 
-            auto mix = kick_hat_on * (0.5f * kick() + 0.25f * hat());
+            auto mix = kick_hat_on * (0.6f * kick() + 0.1f * hat());
             for (auto& pad : pads) {
                 mix += pad_on * 0.03f * pad();
             }
-            mix += bass_on * 0.2f * bass();
+            mix += bass_on * 0.15f * bass();
 
             mix_buf[i] += music_gain * mix;
             mix_buf[i + 1] += music_gain * mix;
