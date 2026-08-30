@@ -36,7 +36,12 @@ void sdl_audio_callback(void* userdata, Uint8* stream, int len) {
     auto* state = static_cast<Window::State*>(userdata);
     if (state->audio_callback) {
         const uint64_t t0 = SDL_GetPerformanceCounter();
-        state->audio_callback(reinterpret_cast<int16_t*>(stream), len / (2 * sizeof(int16_t)));
+        try {
+            state->audio_callback(reinterpret_cast<int16_t*>(stream), len / (2 * sizeof(int16_t)));
+        } catch (...) {
+            std::fprintf(stderr, "audio exception\n");
+            std::memset(stream, 0, len);
+        }
         const uint64_t t1 = SDL_GetPerformanceCounter();
         if (!state->profile_path.empty()) {
             state->audio_sample_ticks.fetch_add(t1 - t0, std::memory_order_relaxed);
@@ -47,6 +52,25 @@ void sdl_audio_callback(void* userdata, Uint8* stream, int len) {
     }
 }
 }  // namespace
+
+static void open_audio_device(Window::State* state) {
+    SDL_AudioSpec desired{};
+    desired.freq = Window::audio_sample_rate;
+    desired.format = AUDIO_S16SYS;
+    desired.channels = 2;
+    desired.samples = 512;
+    desired.callback = sdl_audio_callback;
+    desired.userdata = state;
+
+    SDL_AudioSpec obtained{};
+    state->audio_dev = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
+    if (state->audio_dev != 0) {
+        // 0 unpauses (starts) audio playback (devices start paused by default in SDL2)
+        SDL_PauseAudioDevice(state->audio_dev, 0);
+    } else {
+        std::fprintf(stderr, "audio: failed to open device: %s\n", SDL_GetError());
+    }
+}
 
 // Order must match the `Key` enum in platform.hpp.
 static constexpr SDL_Scancode key_scancodes[] = {
@@ -107,20 +131,7 @@ Window::Window(const WindowSettings& settings) : state(std::make_unique<State>()
     SDL_GL_SetSwapInterval(settings.vsync ? 1 : 0);
 
     // Open audio device
-    SDL_AudioSpec desired, obtained;
-    std::memset(&desired, 0, sizeof(desired));
-    desired.freq = Window::audio_sample_rate;
-    desired.format = AUDIO_S16SYS;
-    desired.channels = 2;
-    desired.samples = 512;
-    desired.callback = sdl_audio_callback;
-    desired.userdata = state.get();
-
-    state->audio_dev = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
-    if (state->audio_dev != 0) {
-        // 0 unpauses (starts) audio playback (devices start paused by default in SDL2)
-        SDL_PauseAudioDevice(state->audio_dev, 0);
-    }
+    open_audio_device(state.get());
 }
 
 Window::~Window() {
@@ -170,6 +181,14 @@ bool Window::frame() {
     while (SDL_PollEvent(&event)) {
         if (event.type == SDL_QUIT) return false;
         if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) return false;
+        if (event.type == SDL_AUDIODEVICEREMOVED && event.adevice.which == state->audio_dev) {
+            SDL_CloseAudioDevice(state->audio_dev);
+            state->audio_dev = 0;
+        }
+        if (event.type == SDL_AUDIODEVICEADDED && state->audio_dev == 0 &&
+            !event.adevice.iscapture) {
+            open_audio_device(state.get());
+        }
     }
     state->prev_held_keys = state->held_keys;
     int numkeys = 0;

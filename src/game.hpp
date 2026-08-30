@@ -166,6 +166,7 @@ struct Mission {
     enum Type { Defense, Sandbox, Race, Chase };
     Type type;
     std::string name;
+    uint64 seed;
     TerrainType terrain_type;
     DroneType player_type;
     std::vector<Circle> objectives;  // empty in sandbox

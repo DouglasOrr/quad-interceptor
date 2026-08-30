@@ -20,8 +20,9 @@ int main(int argc, char** argv) {
         .vsync = true,
         .profile_path = "",
     };
-    bool player_ai = false;
-    float timeout = 0.0f;
+    std::optional<bool> player_ai;
+    std::optional<float> time_limit;
+    std::optional<uint64> seed;
 
     for (int i = 1; i < argc; ++i) {
         // Parse
@@ -68,7 +69,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
         } else if (key == "timeout") {
-            timeout = std::atof(std::string(value).c_str());
+            time_limit = std::atof(std::string(value).c_str());
         } else if (key == "profile") {
             if (value == "true") {
                 settings.profile_path = std::string(argv[0]) + ".profile";
@@ -89,14 +90,17 @@ int main(int argc, char** argv) {
             }
         } else if (key == "msaa") {
             settings.msaa = static_cast<uint>(std::atoi(std::string(value).c_str()));
+        } else if (key == "seed") {
+            seed = static_cast<uint64>(std::strtoull(std::string(value).c_str(), nullptr, 0));
         } else {
             std::cerr << "Error! Unknown arg " << arg << std::endl;
             return 1;
         }
     }
     if (player_type) mission.player_type = *player_type;
-    mission.player_ai = player_ai;
-    mission.time_limit = timeout;
+    if (player_ai) mission.player_ai = *player_ai;
+    if (time_limit) mission.time_limit = *time_limit;
+    if (seed) mission.seed = *seed;
 
     Window window(settings);
     game_loop(window, mission);

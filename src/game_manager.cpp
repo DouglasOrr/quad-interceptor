@@ -180,6 +180,7 @@ std::vector<Mission> Mission::all() {
         sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
         sandbox.enemy_spawn_interval = 10.0f;
         sandbox.max_enemies = 3;
+        sandbox.seed = 0x5a17b0bULL;
         missions.push_back(sandbox);
 
         Mission defense = proto;
@@ -189,6 +190,7 @@ std::vector<Mission> Mission::all() {
         defense.enemy_spawn_interval = 10.0f;
         defense.max_enemies = 3;
         defense.starting_lives = 5;
+        defense.seed = 0xdef5eedULL;
         defense.objectives = {Circle{terrain.kind == TerrainType::Kind::City
                                          ? terrain.city.snap_intersection({0, 0})
                                          : Vec<2>{0, 0},
@@ -198,6 +200,7 @@ std::vector<Mission> Mission::all() {
         Mission race = proto;
         race.type = Mission::Race;
         race.name = terrain.kind == TerrainType::Kind::Plains ? "plains/race" : "race";
+        race.seed = 0xace5aceULL;
         for (auto u : circuit) {
             const float race_span =
                 terrain.kind == TerrainType::Kind::Plains
@@ -217,6 +220,7 @@ std::vector<Mission> Mission::all() {
         chase.max_enemies = 1;
         chase.starting_lives = 3;
         chase.time_limit = 60.0f;
+        chase.seed = 0xca5e7fULL;
         missions.push_back(chase);
     }
 
@@ -379,6 +383,7 @@ void game_loop(Window& window, const Mission& mission) {
     state.mission = mission;
     state.lives = state.mission.starting_lives;
     state.terrain.type = state.mission.terrain_type;
+    state.terrain.seed = static_cast<int64>(hash(state.mission.seed, uint64_t{0xf738a04c}));
     GameManager game_manager;
     game_manager.update(state);
     AI ai;
