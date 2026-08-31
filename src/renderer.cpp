@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -1604,25 +1605,27 @@ struct FpsView {
 
 struct MenuView {
     struct Item {
-        enum Type : uint8_t { Plain };
-        Type kind;
-        const char* label;
-        const char* value;
-        bool enabled;
-        float row_bottom;
+        enum Type : uint8_t { Plain, Choice, Toggle, Slider, KeyBinding };
+        Type type = Plain;
+        std::string label;
+        std::string value;  // Choice/KeyBinding: right-hand text, Plain: optional value
+        bool enabled = true;
+        bool on = false;                                   // Toggle
+        float fraction = 0.0f;                             // Slider, 0..1
+        int index = 0;                                     // Choice selected option index
+        std::vector<std::pair<const char*, int>> options;  // Choice: (label, value)
+        int data = 0;                                      // KeyBinding: Action::Type of this row
+        bool reset = false;                                // Controls "Reset to defaults" row
+        float row_bottom = 0.0f;
     };
-    const char* title;
-    const char* footer;
+    const char* title = nullptr;
+    const char* footer = nullptr;
     std::vector<Item> items;
     Vec<2> font_size;
     float line_h;
     float margin;
 
-    void add(Item::Type type, const char* label, const char* value = nullptr, bool enabled = true) {
-        items.push_back({type, label, value, enabled, 0.0f});
-    }
-
-    int row_hit(Vec<2> vp, Vec<2> mouse) {
+    int row_hit(Vec<2> vp, Vec<2> mouse) const {
         if (mouse[0] < margin || mouse[0] > vp[0] - margin) return -1;
         for (uint i = 0; i < items.size(); ++i) {
             if (mouse[1] >= items[i].row_bottom && mouse[1] < items[i].row_bottom + line_h)
@@ -1631,6 +1634,66 @@ struct MenuView {
         return -1;
     }
 };
+
+MenuView::Item plain_item(const char* label, bool enabled = true) {
+    MenuView::Item it;
+    it.type = MenuView::Item::Plain;
+    it.label = label;
+    it.enabled = enabled;
+    return it;
+}
+
+MenuView::Item choice_item(const char* label,
+                           std::vector<std::pair<const char*, int>> options,
+                           int index) {
+    MenuView::Item it;
+    it.type = MenuView::Item::Choice;
+    it.label = label;
+    it.options = std::move(options);
+    it.index = index;
+    return it;
+}
+
+MenuView::Item toggle_item(const char* label, bool on) {
+    MenuView::Item it;
+    it.type = MenuView::Item::Toggle;
+    it.label = label;
+    it.on = on;
+    return it;
+}
+
+MenuView::Item slider_item(const char* label, float fraction) {
+    MenuView::Item it;
+    it.type = MenuView::Item::Slider;
+    it.label = label;
+    it.fraction = fraction;
+    return it;
+}
+
+MenuView::Item keybinding_item(const char* label, const char* value, int action) {
+    MenuView::Item it;
+    it.type = MenuView::Item::KeyBinding;
+    it.label = label;
+    it.value = value;
+    it.data = action;
+    return it;
+}
+
+// Empty disabled row; separates groups visually and is skipped by the cursor.
+MenuView::Item spacer_item() {
+    MenuView::Item it;
+    it.type = MenuView::Item::Plain;
+    it.enabled = false;
+    return it;
+}
+
+MenuView::Item reset_item() {
+    MenuView::Item it;
+    it.type = MenuView::Item::Plain;
+    it.label = "Reset to defaults";
+    it.reset = true;
+    return it;
+}
 
 std::string fmt_str(float f, const char* spec) {
     char buf[64];
@@ -1654,52 +1717,112 @@ struct Menus {
     Mesh quad;
     MenuView view;
     ShellState::Screen prev_screen = ShellState::Screen::count;
+    ShellState::Screen parent = ShellState::Screen::Main;
     int cursor = 0;
+    int pending_binding = -1;
 
-    void update(Window& window, ShellState& shell, const TextBatch& text) {
-        shell.result = ShellState::Result::None;
-        if (prev_screen != shell.screen) {
-            prev_screen = shell.screen;
-            cursor = 0;
-        }
+    // Progress-bar geometry shared by hit-testing and drawing, so every slider
+    // starts/ends at the same place: 15 char widths from the left, 5 from the right.
+    void slider_track(const MenuView& v, Vec<2> vp, uint i, float& x0, float& x1, float& cy) const {
+        const float cw = v.font_size[0] * label_scale;
+        x0 = v.margin + 15.0f * cw;
+        x1 = vp[0] - v.margin - 5.0f * cw;
+        cy = v.items[i].row_bottom + 0.5f * v.line_h;
+    }
 
-        GLint vp[4];
-        glGetIntegerv(GL_VIEWPORT, vp);
-        const float vp_w = float(vp[2]);
-        const float vp_h = float(vp[3]);
-
-        // Re-layout the MenuView
+    void build(const ShellState& shell,
+               const Settings& settings,
+               const TextBatch& text,
+               Vec<2> vp) {
         view = {};
         view.font_size = text.base_font_size();
         view.line_h = line_height_scale * view.font_size[1];
-        view.margin = 0.15f * std::min(vp_w, vp_h);
+        view.margin = 0.15f * std::min(vp[0], vp[1]);
         switch (shell.screen) {
             case ShellState::Screen::Main:
                 view.title = "SMALL GAME";
                 view.footer = "up/down: move | enter: select | esc: quit";
-                view.add(MenuView::Item::Plain, "Play");
-                view.add(MenuView::Item::Plain, "Quit");
+                view.items.push_back(plain_item("Play"));
+                view.items.push_back(plain_item("Settings"));
+                view.items.push_back(plain_item("Quit"));
                 break;
             case ShellState::Screen::Missions: {
                 view.title = "MISSIONS";
                 view.footer = "esc: back | complete a mission to unlock the next";
-                std::vector<std::string> labels(shell.missions.size());
-                std::vector<std::string> values(shell.missions.size());
                 for (size_t i = 0; i < shell.missions.size(); ++i) {
-                    auto& ms = shell.missions[i];
-                    labels[i] = ms.name;
+                    const auto& ms = shell.missions[i];
+                    auto it = plain_item(ms.name.c_str(), ms.unlocked);
                     if (!ms.unlocked) {
-                        values[i] = "locked";
+                        it.value = "locked";
                     } else if (ms.best.type != MissionResult::Completed) {
-                        values[i] = "new";
+                        it.value = "new";
                     } else {
-                        values[i] = "best";
-                        if (ms.best.time > 0.0f) values[i] += " " + fmt_str(ms.best.time, "%.1fs");
-                        if (ms.best.score > 0) values[i] += " " + fmt_int(ms.best.score);
+                        it.value = "best";
+                        if (ms.best.time > 0.0f) it.value += " " + fmt_str(ms.best.time, "%.1fs");
+                        if (ms.best.score > 0) it.value += " " + fmt_int(ms.best.score);
                     }
-                    view.add(MenuView::Item::Plain, labels[i].c_str(), values[i].c_str(),
-                             ms.unlocked);
+                    view.items.push_back(std::move(it));
                 }
+                view.items.push_back(spacer_item());
+                view.items.push_back(plain_item("Back"));
+                break;
+            }
+            case ShellState::Screen::Pause:
+                view.title = "PAUSED";
+                view.footer = "esc: resume";
+                view.items.push_back(plain_item("Resume"));
+                view.items.push_back(plain_item("Restart"));
+                view.items.push_back(plain_item("Settings"));
+                view.items.push_back(plain_item("Abandon"));
+                break;
+            case ShellState::Screen::Settings:
+                view.title = "SETTINGS";
+                view.footer = "esc: back";
+                view.items.push_back(plain_item("Graphics"));
+                view.items.push_back(plain_item("Sound"));
+                view.items.push_back(plain_item("Controls"));
+                view.items.push_back(spacer_item());
+                view.items.push_back(plain_item("Back"));
+                break;
+            case ShellState::Screen::Graphics: {
+                view.title = "GRAPHICS";
+                view.footer = "esc: back | msaa applies on restart";
+                int msaa_index = 0;
+                const std::array<int, 4> modes{1, 2, 4, 8};
+                for (int n = 0; n < int(modes.size()); ++n)
+                    if (int(settings.msaa) == modes[n]) msaa_index = n;
+                view.items.push_back(choice_item("Window mode",
+                                                 {{"Windowed", 0}, {"Fullscreen", 1}},
+                                                 settings.fullscreen ? 1 : 0));
+                view.items.push_back(
+                    choice_item("MSAA", {{"1x", 1}, {"2x", 2}, {"4x", 4}, {"8x", 8}}, msaa_index));
+                view.items.push_back(toggle_item("VSync", settings.vsync));
+                view.items.push_back(spacer_item());
+                view.items.push_back(plain_item("Back"));
+                break;
+            }
+            case ShellState::Screen::Sound:
+                view.title = "SOUND";
+                view.footer = "esc: back | left/right: adjust";
+                view.items.push_back(slider_item("Master volume", settings.master_volume));
+                view.items.push_back(slider_item("Music volume", settings.music_volume));
+                view.items.push_back(slider_item("Effects volume", settings.effects_volume));
+                view.items.push_back(spacer_item());
+                view.items.push_back(plain_item("Back"));
+                break;
+            case ShellState::Screen::Controls: {
+                view.title = "CONTROLS";
+                view.footer = "esc: back | enter: rebind | duplicate bindings swap";
+                for (uint a = 0; a < size_t(Action::count); ++a) {
+                    if (a == 4) view.items.push_back(spacer_item());  // grouped for easier scan
+                    view.items.push_back(keybinding_item(Action::name(Action::Type(a)),
+                                                         scancode_name(settings.bindings[a]),
+                                                         int(a)));
+                }
+                view.items.push_back(spacer_item());  // before Reset to defaults
+                view.items.push_back(reset_item());
+                view.items.push_back(spacer_item());  // after Reset to defaults
+                view.items.push_back(plain_item("Back"));
                 break;
             }
             default:
@@ -1707,12 +1830,206 @@ struct Menus {
                 break;
         }
         for (uint i = 0; i < view.items.size(); ++i)
-            view.items[i].row_bottom = vp_h - view.margin - float(i + 1) * view.line_h;
+            view.items[i].row_bottom = vp[1] - view.margin - float(i + 1) * view.line_h;
+    }
 
-        // Update the cursor
+    void enter_submenu(ShellState& shell, ShellState::Screen scr) {
+        if (scr == ShellState::Screen::Settings) parent = shell.screen;  // who opened Settings
+        shell.screen = scr;
+    }
 
-        int hover = view.row_hit({vp_w, vp_h}, window.mouse_pos());
+    // Push the focused row's value into Settings and persist; returns true if changed.
+    bool apply_row(const ShellState& shell, Settings& settings, Window& window) {
+        const auto& item = view.items[size_t(cursor)];
+        switch (shell.screen) {
+            case ShellState::Screen::Graphics:
+                if (cursor == 0) {
+                    settings.fullscreen = item.options[size_t(item.index)].second != 0;
+                    window.set_mode(settings.fullscreen ? WindowMode::Fullscreen
+                                                        : WindowMode::Windowed);
+                } else if (cursor == 1) {
+                    settings.msaa = uint(item.options[size_t(item.index)].second);
+                } else if (cursor == 2) {
+                    settings.vsync = item.on;
+                    window.set_vsync(item.on);
+                }
+                break;
+            case ShellState::Screen::Sound:
+                if (cursor == 0) {
+                    settings.master_volume = item.fraction;
+                } else if (cursor == 1) {
+                    settings.music_volume = item.fraction;
+                } else if (cursor == 2) {
+                    settings.effects_volume = item.fraction;
+                }
+                break;
+            default:
+                return false;
+        }
+        settings.save(get_config_dir());
+        return true;
+    }
+
+    bool adjust(const ShellState& shell, Settings& settings, Window& window, int dir) {
+        auto& item = view.items[size_t(cursor)];
+        switch (item.type) {
+            case MenuView::Item::Choice: {
+                const int n = int(item.options.size());
+                if (n == 0) return false;
+                item.index = (item.index + dir + n) % n;
+                break;
+            }
+            case MenuView::Item::Toggle:
+                item.on = !item.on;
+                break;
+            case MenuView::Item::Slider: {
+                constexpr float step = 0.05f;
+                item.fraction = std::clamp(item.fraction + float(dir) * step, 0.0f, 1.0f);
+                break;
+            }
+            default:
+                return false;
+        }
+        return apply_row(shell, settings, window);
+    }
+
+    bool activate(ShellState& shell, Settings& settings, Window& window) {
+        auto& item = view.items[size_t(cursor)];
+        switch (item.type) {
+            case MenuView::Item::Choice:
+                if (item.options.empty()) return false;
+                item.index = (item.index + 1) % int(item.options.size());
+                return apply_row(shell, settings, window);
+            case MenuView::Item::Toggle:
+                item.on = !item.on;
+                return apply_row(shell, settings, window);
+            case MenuView::Item::Slider:
+                return false;
+            case MenuView::Item::KeyBinding:
+                pending_binding = item.data;  // the Action::Type, not the row index
+                return false;
+            case MenuView::Item::Plain:
+                break;
+        }
+        // Plain item: navigation
+        switch (shell.screen) {
+            case ShellState::Screen::Main:
+                if (cursor == 0) {
+                    shell.screen = ShellState::Screen::Missions;
+                } else if (cursor == 1) {
+                    enter_submenu(shell, ShellState::Screen::Settings);
+                } else if (cursor == 2) {
+                    shell.navigation = ShellState::Navigation::Quit;
+                }
+                break;
+            case ShellState::Screen::Missions:
+                if (cursor == int(view.items.size()) - 1) {  // Back row
+                    shell.screen = ShellState::Screen::Main;
+                } else {
+                    gassert(shell.missions[size_t(cursor)].unlocked);
+                    shell.chosen = Mission::all()[size_t(cursor)];
+                    shell.navigation = ShellState::Navigation::Play;
+                }
+                break;
+            case ShellState::Screen::Pause:
+                if (cursor == 0) {
+                    shell.navigation = ShellState::Navigation::Resume;
+                } else if (cursor == 1) {
+                    shell.navigation = ShellState::Navigation::Restart;
+                } else if (cursor == 2) {
+                    enter_submenu(shell, ShellState::Screen::Settings);
+                } else if (cursor == 3) {
+                    shell.navigation = ShellState::Navigation::Abandon;
+                }
+                break;
+            case ShellState::Screen::Settings:
+                if (cursor == 0) {
+                    enter_submenu(shell, ShellState::Screen::Graphics);
+                } else if (cursor == 1) {
+                    enter_submenu(shell, ShellState::Screen::Sound);
+                } else if (cursor == 2) {
+                    enter_submenu(shell, ShellState::Screen::Controls);
+                } else {
+                    shell.screen = parent;  // Back
+                }
+                break;
+            case ShellState::Screen::Graphics:
+            case ShellState::Screen::Sound:
+            case ShellState::Screen::Controls:
+                if (cursor == int(view.items.size()) - 1)
+                    shell.screen = ShellState::Screen::Settings;
+                break;
+            default:
+                break;
+        }
+        if (shell.screen == ShellState::Screen::Controls && view.items[size_t(cursor)].reset) {
+            settings.bindings = Settings::defaults().bindings;  // reset to defaults row
+            settings.save(get_config_dir());
+            return true;
+        }
+        return false;
+    }
+
+    void back(ShellState& shell) {
+        switch (shell.screen) {
+            case ShellState::Screen::Main:
+                shell.navigation = ShellState::Navigation::Quit;
+                break;
+            case ShellState::Screen::Pause:
+                shell.navigation = ShellState::Navigation::Resume;
+                break;
+            case ShellState::Screen::Missions:
+                shell.screen = ShellState::Screen::Main;
+                break;
+            case ShellState::Screen::Settings:
+                shell.screen = parent;  // the screen that opened settings
+                break;
+            case ShellState::Screen::Graphics:
+            case ShellState::Screen::Sound:
+            case ShellState::Screen::Controls:
+                shell.screen = ShellState::Screen::Settings;
+                break;
+            default:
+                break;
+        }
+    }
+
+    void update(Window& window, ShellState& shell, Settings& settings, const TextBatch& text) {
+        shell.navigation = ShellState::Navigation::None;
+        if (prev_screen != shell.screen) {
+            prev_screen = shell.screen;
+            cursor = 0;
+        }
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const Vec<2> vp2{float(vp[2]), float(vp[3])};
+        build(shell, settings, text, vp2);
+
+        // While capturing a binding, all other input is ignored.
+        if (pending_binding >= 0) {
+            if (window.pressed(Key::esc)) {
+                pending_binding = -1;
+            } else if (const auto sc = window.scancode_pressed_any()) {
+                gassert(shell.screen == ShellState::Screen::Controls);
+                const auto action = Action::Type(pending_binding);
+                const int old = settings.bindings[size_t(action)];
+                for (uint a = 0; a < size_t(Action::count); ++a) {
+                    if (settings.bindings[a] == *sc && a != size_t(action))
+                        settings.bindings[a] = old;  // duplicate: swap
+                }
+                settings.bindings[size_t(action)] = *sc;
+                pending_binding = -1;
+                settings.save(get_config_dir());
+            }
+            build(shell, settings, text, vp2);  // show the fresh binding ("..." while pending)
+            return;
+        }
+
+        // Mouse hover moves the shared cursor
+        const int hover = view.row_hit(vp2, window.mouse_pos());
         if (hover >= 0 && view.items[size_t(hover)].enabled) cursor = hover;
+
         // Keyboard navigation skips disabled rows
         auto move_cursor = [&](int dir) {
             const int n = int(view.items.size());
@@ -1727,50 +2044,49 @@ struct Menus {
         if (window.pressed(Key::up)) move_cursor(-1);
         if (window.pressed(Key::down)) move_cursor(1);
         cursor = std::clamp(cursor, 0, std::max(0, int(view.items.size()) - 1));
+        if (view.items.empty()) return;
 
-        // Handle selection
-        bool click = (window.mouse_pressed(1) && hover >= 0 && hover == cursor) ||
-                     window.pressed(Key::enter) || window.pressed(Key::space);
-        click &= view.items[size_t(cursor)].enabled;
-        if (click) {
-            switch (shell.screen) {
-                case ShellState::Screen::Main:
-                    if (cursor == 0) {
-                        shell.screen = ShellState::Screen::Missions;
-                    } else if (cursor == 1) {
-                        shell.result = ShellState::Result::Quit;
-                    }
-                    break;
-                case ShellState::Screen::Missions:
-                    gassert(shell.missions[size_t(cursor)].unlocked);
-                    shell.chosen = Mission::all()[size_t(cursor)];
-                    shell.result = ShellState::Result::Play;
-                    break;
-                default:
-                    break;
+        bool changed = false;
+        if (window.pressed(Key::left)) changed = adjust(shell, settings, window, -1) || changed;
+        if (window.pressed(Key::right)) changed = adjust(shell, settings, window, +1) || changed;
+
+        // Clicking a progress bar sets its level directly, rounded to 5% increments.
+        if (window.mouse_pressed(1)) {
+            const Vec<2> mouse = window.mouse_pos();
+            for (uint i = 0; i < view.items.size(); ++i) {
+                auto& it = view.items[i];
+                if (it.type != MenuView::Item::Slider || !it.enabled) continue;
+                float x0, x1, cy;
+                slider_track(view, vp2, i, x0, x1, cy);
+                // The whole row height is clickable; only the x-range picks the level.
+                const float yb = view.items[i].row_bottom;
+                if (mouse[1] < yb || mouse[1] >= yb + view.line_h || mouse[0] < x0 || mouse[0] > x1)
+                    continue;
+                constexpr float step = 0.05f;
+                it.fraction =
+                    std::clamp(std::round((mouse[0] - x0) / (x1 - x0) / step) * step, 0.0f, 1.0f);
+                cursor = int(i);
+                changed = apply_row(shell, settings, window) || changed;
+                break;
             }
         }
-
-        // Handle ESC navigation
-        if (window.pressed(Key::esc)) {
-            switch (shell.screen) {
-                case ShellState::Screen::Main:
-                    shell.result = ShellState::Result::Quit;
-                    break;
-                default:
-                    shell.screen = ShellState::Screen::Main;
-                    break;
-            }
+        if ((window.mouse_pressed(1) && hover >= 0 && hover == cursor) ||
+            window.pressed(Key::enter) || window.pressed(Key::space)) {
+            if (view.items[size_t(cursor)].enabled)
+                changed = activate(shell, settings, window) || changed;
         }
+        if (window.pressed(Key::esc)) back(shell);
+
+        if (changed || shell.navigation != ShellState::Navigation::None ||
+            prev_screen != shell.screen)
+            build(shell, settings, text, vp2);
     }
 
-    void draw(TextBatch& text, FlatShader& flat) {
+    void draw(TextBatch& text, FlatShader& flat, bool overlay) {
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
         const float vp_w = float(vp[2]);
         const float vp_h = float(vp[3]);
-        glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         auto draw_rect = [&](float x0, float y0, float x1, float y1, const Vec<3>& color,
                              float alpha) {
@@ -1793,6 +2109,14 @@ struct Menus {
             glDisable(GL_BLEND);
             glEnable(GL_DEPTH_TEST);
         };
+
+        if (overlay) {
+            draw_rect(0.0f, 0.0f, vp_w, vp_h, Vec<3>{0.02f, 0.02f, 0.04f}, 0.65f);
+        } else {
+            glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        }
+
         const Vec<3> dim{0.45f, 0.45f, 0.45f};
         const Vec<3> lit{0.35f, 0.8f, 1.0f};
 
@@ -1812,17 +2136,49 @@ struct Menus {
         }
 
         // Rows
-        for (size_t i = 0; i < view.items.size(); ++i) {
+        for (uint i = 0; i < view.items.size(); ++i) {
             const MenuView::Item& item = view.items[i];
             const float yb = item.row_bottom;
             const bool hover = int(i) == cursor;
             const Vec<3> label_col = !item.enabled ? dim : (hover ? lit : Vec<3>{1.0f, 1.0f, 1.0f});
-            text.draw(item.label, view.margin, yb, label_scale, label_col);
+            text.draw(item.label.c_str(), view.margin, yb, label_scale, label_col);
 
-            if (item.value && *item.value) {
-                const float vw = float(std::strlen(item.value)) * view.font_size[0] * label_scale;
+            std::string value;
+            switch (item.type) {
+                case MenuView::Item::Choice:
+                    if (item.index >= 0 && item.index < int(item.options.size()))
+                        value = item.options[size_t(item.index)].first;
+                    break;
+                case MenuView::Item::Toggle:
+                    value = item.on ? "ON" : "OFF";
+                    break;
+                case MenuView::Item::KeyBinding:
+                    value = (pending_binding >= 0 && item.data == pending_binding)
+                                ? "< press a key >"
+                                : item.value;
+                    break;
+                case MenuView::Item::Slider:
+                    value = fmt_int(uint(std::lround(item.fraction * 100.0f))) + "%";
+                    break;
+                case MenuView::Item::Plain:
+                    value = item.value;
+                    break;
+            }
+
+            if (item.type == MenuView::Item::Slider && item.enabled) {
+                float x0, x1, cy;
+                slider_track(view, {vp_w, vp_h}, i, x0, x1, cy);
+                const float th = 0.1f * view.line_h;
+                draw_rect(x0, cy - th, x1, cy + th, Vec<3>{0.25f, 0.25f, 0.30f}, 1.0f);
+                const float fill = x0 + item.fraction * (x1 - x0);
+                if (fill > x0)
+                    draw_rect(x0, cy - th, fill, cy + th, Vec<3>{0.35f, 0.8f, 1.0f}, 1.0f);
+            }
+
+            if (!value.empty()) {
+                const float vw = float(value.size()) * view.font_size[0] * label_scale;
                 const Vec<3> val_col = !item.enabled ? dim : Vec<3>{0.85f, 0.85f, 0.85f};
-                text.draw(item.value, vp_w - view.margin - vw, yb, label_scale, val_col);
+                text.draw(value.c_str(), vp_w - view.margin - vw, yb, label_scale, val_col);
             }
         }
 
@@ -1895,7 +2251,10 @@ void Renderer::draw(const GameState& s, float dt) {
     state->fps.draw(dt, state->text);
 }
 
-void Renderer::menu_update_draw(Window& window, ShellState& shell) {
-    state->menus.update(window, shell, state->text);
-    state->menus.draw(state->text, state->flat);
+void Renderer::menu_update_draw(Window& window,
+                                ShellState& shell,
+                                Settings& settings,
+                                bool overlay) {
+    state->menus.update(window, shell, settings, state->text);
+    state->menus.draw(state->text, state->flat, overlay);
 }

@@ -35,7 +35,7 @@ TEST_CASE("game loop runs for a few frames") {
         .profile_path = "",
     });
     Renderer renderer;
-    const Settings settings = Settings::defaults();
+    Settings settings = Settings::defaults();
     for (auto& mission : Mission::all()) {
         mission.player_ai = true;
         mission.time_limit = 0.25f;
@@ -77,6 +77,7 @@ TEST_CASE("settings round-trip") {
     s.vsync = false;
     s.master_volume = 0.33f;
     s.music_volume = 0.75f;
+    s.effects_volume = 0.55f;
     s.bindings[size_t(Action::LiftUp)] = SDL_SCANCODE_SPACE;
     s.save(dir);
 
@@ -87,6 +88,7 @@ TEST_CASE("settings round-trip") {
     CHECK(t.vsync == s.vsync);
     CHECK(t.master_volume == doctest::Approx(s.master_volume));
     CHECK(t.music_volume == doctest::Approx(s.music_volume));
+    CHECK(t.effects_volume == doctest::Approx(s.effects_volume));
     CHECK(t.bindings == s.bindings);
 }
 

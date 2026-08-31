@@ -64,7 +64,7 @@ void parse_binding(const std::string& key, const std::string& value, Settings& s
     gassert(key.starts_with("bind."));
     const std::string name = key.substr(5);
     for (uint i = 0; i < size_t(Action::count); ++i) {
-        if (name == action_name(Action(i))) {
+        if (name == Action::key(Action::Type(i))) {
             int sc = 0;
             bool parse_failed = false;
             parse_int(value, sc, parse_failed, settings_file);
@@ -91,7 +91,7 @@ std::string fmt_float(float f) {
 
 }  // namespace
 
-const char* action_name(Action a) {
+const char* Action::key(Type a) {
     switch (a) {
         case Action::RollLeft:
             return "roll_left";
@@ -114,6 +114,29 @@ const char* action_name(Action a) {
     }
 }
 
+const char* Action::name(Type a) {
+    switch (a) {
+        case Action::RollLeft:
+            return "left (roll)";
+        case Action::RollRight:
+            return "right (roll)";
+        case Action::PitchFwd:
+            return "forward (pitch)";
+        case Action::PitchBack:
+            return "back (pitch)";
+        case Action::LiftUp:
+            return "up (lift)";
+        case Action::LiftDown:
+            return "down (lift)";
+        case Action::YawLeft:
+            return "rotate left (yaw)";
+        case Action::YawRight:
+            return "rotate right (yaw)";
+        default:
+            return "?";
+    }
+}
+
 std::string get_config_dir() {
     if (const char* env = std::getenv("SMALLGAME_CONFIG_DIR"); env && *env) return env;
     if (std::string pref = Window::pref_path("SmallGame"); !pref.empty()) return pref;
@@ -125,13 +148,14 @@ Settings Settings::defaults() {
     s.fullscreen = false;
     s.msaa = 1;
     s.vsync = true;
-    s.master_volume = 0.8f;
+    s.master_volume = 1.0f;
     s.music_volume = 0.5f;
+    s.effects_volume = 0.5f;
     s.bindings = {
         SDL_SCANCODE_LEFT,   // RollLeft
         SDL_SCANCODE_RIGHT,  // RollRight
-        SDL_SCANCODE_DOWN,   // PitchFwd
-        SDL_SCANCODE_UP,     // PitchBack
+        SDL_SCANCODE_UP,     // PitchFwd
+        SDL_SCANCODE_DOWN,   // PitchBack
         SDL_SCANCODE_X,      // LiftUp
         SDL_SCANCODE_LALT,   // LiftDown
         SDL_SCANCODE_Z,      // YawLeft
@@ -171,6 +195,10 @@ Settings::LoadResult Settings::load(const std::string& dir) {
             float f = 0.0f;
             parse_float(value, f, failed, settings_file);
             if (!failed) music_volume = std::clamp(f, 0.0f, 1.0f);
+        } else if (key == "effects_volume") {
+            float f = 0.0f;
+            parse_float(value, f, failed, settings_file);
+            if (!failed) effects_volume = std::clamp(f, 0.0f, 1.0f);
         } else if (key.starts_with("bind.")) {
             parse_binding(key, value, *this, failed);
         } else {
@@ -192,8 +220,9 @@ void Settings::save(const std::string& dir) const {
     out << "vsync=" << (vsync ? "true" : "false") << '\n';
     out << "master_volume=" << fmt_float(master_volume) << '\n';
     out << "music_volume=" << fmt_float(music_volume) << '\n';
+    out << "effects_volume=" << fmt_float(effects_volume) << '\n';
     for (uint i = 0; i < size_t(Action::count); ++i)
-        out << "bind." << action_name(Action(i)) << '=' << bindings[i] << '\n';
+        out << "bind." << Action::key(Action::Type(i)) << '=' << bindings[i] << '\n';
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -205,7 +234,7 @@ ShellState load_shell(const std::string& dir) {
     ShellState shell{
         .persistent = true,
         .screen = ShellState::Screen::Main,
-        .result = ShellState::Result::None,
+        .navigation = ShellState::Navigation::None,
         .chosen{},
         .missions{},
     };
@@ -289,14 +318,14 @@ void shell_loop(Window& window, Settings& settings) {
     save_shell(shell, config_dir);
     Renderer renderer;
     while (window.frame()) {
-        renderer.menu_update_draw(window, shell);
-        switch (shell.result) {
-            case ShellState::Result::Play:
+        renderer.menu_update_draw(window, shell, settings, /*overlay*/ false);
+        switch (shell.navigation) {
+            case ShellState::Navigation::Play:
                 game_loop(window, renderer, settings, shell.chosen);
                 shell.screen = ShellState::Screen::Missions;
-                shell.result = ShellState::Result::None;
+                shell.navigation = ShellState::Navigation::None;
                 break;
-            case ShellState::Result::Quit:
+            case ShellState::Navigation::Quit:
                 save_shell(shell, config_dir);
                 return;
             default:

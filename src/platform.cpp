@@ -27,9 +27,12 @@ struct Window::State {
     std::array<Uint8, 4> mouse{};  // index = SDL button (1..3)
     std::array<Uint8, 4> prev_mouse{};
     Vec<2> mouse_pos{};
-    SDL_Scancode test_scancode = SDL_NUM_SCANCODES;
-    float test_delay = 0.0f;
-    uint64_t test_trigger_time = 0;
+    struct TestPress {
+        SDL_Scancode sc;
+        float delay;
+        uint64_t trigger_time;
+    };
+    std::vector<TestPress> test_presses;
 
     // Profiling
     std::string profile_path;
@@ -232,15 +235,21 @@ bool Window::frame() {
         state->keys[sc] = (sc < numkeys) ? kb[sc] : 0;
     }
 
-    // Test hook: applies a scheduled single-frame key press once.
-    if (state->test_scancode < SDL_NUM_SCANCODES) {
+    // Test hook: fires each scheduled single-frame key press once.
+    if (!state->test_presses.empty()) {
         const uint64_t freq = SDL_GetPerformanceFrequency();
         const uint64_t now = SDL_GetPerformanceCounter();
-        if (state->test_trigger_time == 0)
-            state->test_trigger_time = uint64(now + freq * state->test_delay);
-        if (now >= state->test_trigger_time) {
-            state->keys[state->test_scancode] = 1;
-            state->test_scancode = SDL_NUM_SCANCODES;
+        for (auto i = 0u; i < state->test_presses.size();) {
+            auto& p = state->test_presses[i];
+            if (p.trigger_time == 0) {
+                p.trigger_time = uint64(now + freq * p.delay);
+            }
+            if (now >= p.trigger_time) {
+                state->keys[p.sc] = 1;
+                state->test_presses.erase(state->test_presses.begin() + i);
+            } else {
+                ++i;
+            }
         }
     }
 
@@ -315,17 +324,26 @@ void Window::set_vsync(bool vsync) {
 }
 
 void Window::test_press_after(Key key, float seconds) {
-    state->test_scancode = key_scancodes[static_cast<size_t>(key)];
-    state->test_delay = seconds;
-    state->test_trigger_time = 0;
+    state->test_presses.push_back({key_scancodes[static_cast<size_t>(key)], seconds, 0});
 }
 
 void Window::set_mode(WindowMode mode) {
-    if (SDL_SetWindowFullscreen(
-            state->window, mode == WindowMode::Fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) !=
-        0) {
-        std::fprintf(stderr, "window: failed to set mode: %s\n", SDL_GetError());
+    if (mode == WindowMode::Fullscreen) {
+        if (SDL_SetWindowFullscreen(state->window, SDL_WINDOW_FULLSCREEN_DESKTOP) != 0) {
+            std::fprintf(stderr, "window: failed to set fullscreen: %s\n", SDL_GetError());
+        }
+        return;
     }
+    // Windowed: the window currently spans the whole display, so shrink it to
+    // 2/3 of the display resolution (otherwise it would linger at fullscreen size).
+    SDL_DisplayMode dm;
+    if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
+        SDL_SetWindowSize(state->window, (dm.w * 2) / 3, (dm.h * 2) / 3);
+    }
+    if (SDL_SetWindowFullscreen(state->window, 0) != 0) {
+        std::fprintf(stderr, "window: failed to leave fullscreen: %s\n", SDL_GetError());
+    }
+    SDL_SetWindowPosition(state->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 }
 
 const char* scancode_name(int sc) {

@@ -199,18 +199,22 @@ struct GameState {
 ///////////////////////////////////////////////////////////////////////////////
 // Shell (shell.cpp)
 
-enum class Action : uint8_t {
-    RollLeft,
-    RollRight,
-    PitchFwd,
-    PitchBack,
-    LiftUp,
-    LiftDown,
-    YawLeft,
-    YawRight,
-    count
+struct Action {
+    enum Type : uint8_t {
+        RollLeft,
+        RollRight,
+        PitchFwd,
+        PitchBack,
+        LiftUp,
+        LiftDown,
+        YawLeft,
+        YawRight,
+        count
+    };
+
+    static const char* key(Type a);
+    static const char* name(Type a);
 };
-const char* action_name(Action a);
 
 struct Settings {
     enum class LoadResult { OK, NoFile, Error };
@@ -220,6 +224,7 @@ struct Settings {
     bool vsync;
     float master_volume;
     float music_volume;
+    float effects_volume;
     std::array<int, size_t(Action::count)> bindings;  // SDL_Scancode values
 
     static Settings defaults();
@@ -240,12 +245,21 @@ struct ShellState {
         MissionResult best;
         bool unlocked;
     };
-    enum class Screen : uint8_t { Main, Missions, count };
-    enum class Result : uint8_t { None, Play, Quit };
+    enum class Screen : uint8_t {
+        Main,
+        Missions,
+        Pause,
+        Settings,
+        Graphics,
+        Sound,
+        Controls,
+        count
+    };
+    enum class Navigation : uint8_t { None, Play, Resume, Restart, Abandon, Quit, count };
 
     bool persistent;
     Screen screen;
-    Result result;
+    Navigation navigation;
     Mission chosen;
     std::vector<MissionState> missions;
 };
@@ -267,7 +281,7 @@ private:
     std::unique_ptr<State> state;
 };
 
-MissionResult game_loop(Window&, Renderer&, const Settings&, const Mission&);
+MissionResult game_loop(Window&, Renderer&, Settings&, const Mission&);
 
 struct Font {
     struct Glyph {
@@ -316,7 +330,7 @@ struct Renderer {
     ~Renderer();
 
     void draw(const GameState& state, float dt);
-    void menu_update_draw(Window&, ShellState&);
+    void menu_update_draw(Window&, ShellState&, Settings&, bool overlay);
 
 private:
     struct State;
@@ -327,7 +341,7 @@ private:
 // Audio (audio.cpp)
 
 struct AudioEngine {
-    AudioEngine();
+    explicit AudioEngine(const Settings&);
     ~AudioEngine();
 
     void update(const GameState& state);

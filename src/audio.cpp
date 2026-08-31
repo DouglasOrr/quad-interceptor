@@ -13,7 +13,7 @@ constexpr uint sample_rate = Window::audio_sample_rate;
 constexpr float inv_sample_rate = 1.0f / float(sample_rate);
 constexpr float atten_near = 0.08f;  // linear distance term
 constexpr float atten_far = 1e-4f;   // quadratic distance term
-constexpr float dead_noise_gain = 3000.0f;
+constexpr float dead_noise_gain = 2500.0f;
 
 // Doppler
 constexpr float speed_of_sound = 343.0f;  // m/s
@@ -124,7 +124,7 @@ struct Effects {
             });
     }
 
-    void render(std::vector<float>& mix_buf) {
+    void render(std::vector<float>& mix_buf, float volume) {
         int samples = static_cast<int>(mix_buf.size() / 2);
 
         for (auto& d : drones) {
@@ -143,8 +143,8 @@ struct Effects {
                 }
                 pan = std::clamp(pan, -1.0f, 1.0f);
 
-                float left_gain = gain * (0.5f - 0.5f * pan);
-                float right_gain = gain * (0.5f + 0.5f * pan);
+                float left_gain = volume * gain * (0.5f - 0.5f * pan);
+                float right_gain = volume * gain * (0.5f + 0.5f * pan);
                 float freq_target =
                     (motor_base_freq + m.speed * (motor_max_freq - motor_base_freq)) * m.doppler;
 
@@ -178,8 +178,8 @@ struct Effects {
         });
         if (player_dead) {
             for (int i = 0; i < samples; ++i) {
-                mix_buf[i * 2 + 0] += noise.next() * dead_noise_gain;
-                mix_buf[i * 2 + 1] += noise.next() * dead_noise_gain;
+                mix_buf[i * 2 + 0] += noise.next() * dead_noise_gain * volume;
+                mix_buf[i * 2 + 1] += noise.next() * dead_noise_gain * volume;
             }
         }
     }
@@ -441,7 +441,7 @@ struct Music {
         }
     }
 
-    void render(std::vector<float>& mix_buf) {
+    void render(std::vector<float>& mix_buf, float volume) {
         for (auto i = 0u; i < mix_buf.size(); i += 2) {
             auto beat = (phase == 0);
 
@@ -467,8 +467,8 @@ struct Music {
             }
             mix += bass_on * 0.15f * bass();
 
-            mix_buf[i] += music_gain * mix;
-            mix_buf[i + 1] += music_gain * mix;
+            mix_buf[i] += music_gain * volume * mix;
+            mix_buf[i + 1] += music_gain * volume * mix;
             beat_in_bar = (beat_in_bar + beat) % sub_beats;
             bar_in_sec = (bar_in_sec + (beat && (beat_in_bar == 0))) % sec_bars;
             phase += 1;
@@ -487,17 +487,26 @@ struct Music {
 
 struct AudioEngine::State {
     std::mutex mutex;
+    const Settings& settings;
+    float master_volume = 1.0f;
+    float music_volume = 1.0f;
+    float effects_volume = 1.0f;
     std::vector<float> mix_buf;
     Effects effects;
     Music music;
     std::optional<uint64> last_seed;
+
+    explicit State(const Settings& s) : settings(s) {}
 };
 
-AudioEngine::AudioEngine() : state(std::make_unique<State>()) {}
+AudioEngine::AudioEngine(const Settings& settings) : state(std::make_unique<State>(settings)) {}
 AudioEngine::~AudioEngine() = default;
 
 void AudioEngine::update(const GameState& game_state) {
     std::lock_guard<std::mutex> lock(state->mutex);
+    state->master_volume = state->settings.master_volume;
+    state->music_volume = state->settings.music_volume;
+    state->effects_volume = state->settings.effects_volume;
     if (!state->last_seed || *state->last_seed != game_state.mission.seed) {
         state->music.reset(static_cast<uint>(game_state.mission.seed));
         state->last_seed = game_state.mission.seed;
@@ -509,11 +518,12 @@ void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
     std::lock_guard<std::mutex> lock(state->mutex);
 
     state->mix_buf.assign(num_samples * 2, 0.0f);
-    state->effects.render(state->mix_buf);
-    state->music.render(state->mix_buf);
+    state->effects.render(state->mix_buf, state->effects_volume);
+    state->music.render(state->mix_buf, state->music_volume);
 
     for (int i = 0; i < num_samples * 2; ++i) {
         gassert(std::isfinite(state->mix_buf[i]));
-        stream[i] = static_cast<int16_t>(std::clamp(state->mix_buf[i], -32768.0f, 32767.0f));
+        stream[i] = static_cast<int16_t>(
+            std::clamp(state->mix_buf[i] * state->master_volume, -32768.0f, 32767.0f));
     }
 }

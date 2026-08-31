@@ -368,10 +368,10 @@ void GameManager::update(GameState& s) {
 namespace {
 void copy_control(const Window& w, const Settings& settings, Vec<4>& c) {
     auto f = [](bool b) { return b ? 1.0f : 0.0f; };
-    auto read = [&](Action a) { return f(w.scancode_held(settings.bindings[size_t(a)])); };
+    auto read = [&](Action::Type a) { return f(w.scancode_held(settings.bindings[size_t(a)])); };
     c = {};
     c[0] += read(Action::RollRight) - read(Action::RollLeft);
-    c[1] += read(Action::PitchBack) - read(Action::PitchFwd);
+    c[1] += read(Action::PitchFwd) - read(Action::PitchBack);
     c[2] = read(Action::LiftUp) - read(Action::LiftDown);
     c[3] += read(Action::YawRight) - read(Action::YawLeft);
 }
@@ -379,7 +379,7 @@ void copy_control(const Window& w, const Settings& settings, Vec<4>& c) {
 
 MissionResult game_loop(Window& window,
                         Renderer& renderer,
-                        const Settings& settings,
+                        Settings& settings,
                         const Mission& mission) {
     GameState state{};
     auto init_state = [&]() {
@@ -392,7 +392,7 @@ MissionResult game_loop(Window& window,
     GameManager game_manager;
     AI ai;
     Physics physics;
-    AudioEngine audio_engine;
+    AudioEngine audio_engine(settings);
     window.set_audio_callback([&audio_engine](int16_t* stream, int num_frames) {
         audio_engine.fill_buffer(stream, num_frames);
     });
@@ -401,17 +401,53 @@ MissionResult game_loop(Window& window,
 
     Stopwatch stopwatch;
     float physics_time = 0.0f;
+    ShellState pause_shell{};
+    bool paused = false;
+    bool abandoned = false;
     MissionResult result{MissionResult::None, 0.0f, 0u};
-    while (window.frame()) {
+    while (window.frame() && !abandoned) {
         const float dt = stopwatch.lap();
-        if (mission.time_limit > 0 && state.tick * Physics::dt >= mission.time_limit) break;
-        if (window.pressed(Key::esc)) break;  // return to the menu
-        if (window.pressed(Key::hash)) {      // instant restart shortcut
+        if (paused) {
+            renderer.draw(state, dt);  // frozen scene
+            renderer.menu_update_draw(window, pause_shell, settings, /*overlay*/ true);
+            audio_engine.update(state);  // keep volumes live from the pause menu
+            switch (pause_shell.navigation) {
+                case ShellState::Navigation::None:
+                    break;
+                case ShellState::Navigation::Resume:
+                    paused = false;
+                    pause_shell.navigation = ShellState::Navigation::None;
+                    break;
+                case ShellState::Navigation::Restart:
+                    init_state();
+                    game_manager.update(state);
+                    physics_time = 0.0f;
+                    paused = false;
+                    pause_shell.navigation = ShellState::Navigation::None;
+                    break;
+                case ShellState::Navigation::Abandon:
+                    result = {MissionResult::None, 0.0f, 0u};
+                    abandoned = true;
+                    break;
+                default:
+                    break;
+            }
+            continue;
+        }
+        // Normal game loop execution
+        if (window.pressed(Key::esc)) {  // pause menu
+            paused = true;
+            pause_shell.screen = ShellState::Screen::Pause;
+            pause_shell.navigation = ShellState::Navigation::None;
+            continue;
+        }
+        if (window.pressed(Key::hash)) {  // instant restart shortcut
             init_state();
             game_manager.update(state);
             physics_time = 0.0f;
             continue;
         }
+        if (mission.time_limit > 0 && state.tick * Physics::dt >= mission.time_limit) break;
         if (!mission.player_ai) copy_control(window, settings, player_drone(state).control_m);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
@@ -424,7 +460,9 @@ MissionResult game_loop(Window& window,
         audio_engine.update(state);
     }
     window.set_audio_callback({});  // the window's callback can still call into the audio_engine
-    result.time = float(state.timer.value_or(0)) * Physics::dt;
-    result.score = state.kill_count;
+    if (!abandoned) {
+        result.time = float(state.timer.value_or(0)) * Physics::dt;
+        result.score = state.kill_count;
+    }
     return result;
 }
