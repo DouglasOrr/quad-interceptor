@@ -8,11 +8,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "maths.hpp"
 
 struct Window;  // defined in platform.hpp
+struct Renderer;
 
 struct Circle {
     Vec<2> center;
@@ -20,7 +22,7 @@ struct Circle {
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-// State
+// Game State
 //
 // Default world frame; an '_m' suffix marks a model(body)-frame quantity.
 
@@ -195,6 +197,63 @@ struct GameState {
 };
 
 ///////////////////////////////////////////////////////////////////////////////
+// Shell (shell.cpp)
+
+enum class Action : uint8_t {
+    RollLeft,
+    RollRight,
+    PitchFwd,
+    PitchBack,
+    LiftUp,
+    LiftDown,
+    YawLeft,
+    YawRight,
+    count
+};
+const char* action_name(Action a);
+
+struct Settings {
+    enum class LoadResult { OK, NoFile, Error };
+
+    bool fullscreen;
+    uint msaa;
+    bool vsync;
+    float master_volume;
+    float music_volume;
+    std::array<int, size_t(Action::count)> bindings;  // SDL_Scancode values
+
+    static Settings defaults();
+    LoadResult load(const std::string& dir);
+    void save(const std::string& dir) const;
+};
+
+struct MissionResult {
+    enum Type : uint8_t { None, Completed, Failed };
+    Type type;
+    float time;
+    uint score;
+};
+
+struct ShellState {
+    struct MissionState {
+        std::string name;
+        MissionResult best;
+        bool unlocked;
+    };
+    enum class Screen : uint8_t { Main, Missions, count };
+    enum class Result : uint8_t { None, Play, Quit };
+
+    bool persistent;
+    Screen screen;
+    Result result;
+    Mission chosen;
+    std::vector<MissionState> missions;
+};
+
+std::string get_config_dir();
+void shell_loop(Window&, Settings&);
+
+///////////////////////////////////////////////////////////////////////////////
 // Game Manager & Assets (game_manager.cpp)
 
 struct GameManager {
@@ -208,7 +267,7 @@ private:
     std::unique_ptr<State> state;
 };
 
-void game_loop(Window& window, const Mission& mission);
+MissionResult game_loop(Window&, Renderer&, const Settings&, const Mission&);
 
 struct Font {
     struct Glyph {
@@ -257,6 +316,7 @@ struct Renderer {
     ~Renderer();
 
     void draw(const GameState& state, float dt);
+    void menu_update_draw(Window&, ShellState&);
 
 private:
     struct State;

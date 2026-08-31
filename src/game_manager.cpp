@@ -366,43 +366,53 @@ void GameManager::update(GameState& s) {
 // game_loop
 
 namespace {
-void copy_control(const Window& w, Vec<4>& c) {
+void copy_control(const Window& w, const Settings& settings, Vec<4>& c) {
     auto f = [](bool b) { return b ? 1.0f : 0.0f; };
+    auto read = [&](Action a) { return f(w.scancode_held(settings.bindings[size_t(a)])); };
     c = {};
-    // Arrows
-    c[0] += f(w.held(Key::right)) - f(w.held(Key::left));
-    c[1] += f(w.held(Key::up)) - f(w.held(Key::down));
-    // ZXC + Alt
-    c[2] = f(w.held(Key::x)) - f(w.held(Key::alt));
-    c[3] += f(w.held(Key::c)) - f(w.held(Key::z));
+    c[0] += read(Action::RollRight) - read(Action::RollLeft);
+    c[1] += read(Action::PitchBack) - read(Action::PitchFwd);
+    c[2] = read(Action::LiftUp) - read(Action::LiftDown);
+    c[3] += read(Action::YawRight) - read(Action::YawLeft);
 }
 }  // namespace
 
-void game_loop(Window& window, const Mission& mission) {
+MissionResult game_loop(Window& window,
+                        Renderer& renderer,
+                        const Settings& settings,
+                        const Mission& mission) {
     GameState state{};
-    state.mission = mission;
-    state.lives = state.mission.starting_lives;
-    state.terrain.type = state.mission.terrain_type;
-    state.terrain.seed = static_cast<int64>(hash(state.mission.seed, uint64_t{0xf738a04c}));
+    auto init_state = [&]() {
+        state = {};
+        state.mission = mission;
+        state.lives = mission.starting_lives;
+        state.terrain.type = mission.terrain_type;
+        state.terrain.seed = static_cast<int64>(hash(state.mission.seed, uint64_t{0xf738a04c}));
+    };
     GameManager game_manager;
-    game_manager.update(state);
     AI ai;
     Physics physics;
-    Renderer renderer;
     AudioEngine audio_engine;
     window.set_audio_callback([&audio_engine](int16_t* stream, int num_frames) {
         audio_engine.fill_buffer(stream, num_frames);
     });
+    init_state();
+    game_manager.update(state);
+
     Stopwatch stopwatch;
     float physics_time = 0.0f;
+    MissionResult result{MissionResult::None, 0.0f, 0u};
     while (window.frame()) {
         const float dt = stopwatch.lap();
         if (mission.time_limit > 0 && state.tick * Physics::dt >= mission.time_limit) break;
-        if (window.pressed(Key::hash)) {
-            game_loop(window, mission);
-            return;
+        if (window.pressed(Key::esc)) break;  // return to the menu
+        if (window.pressed(Key::hash)) {      // instant restart shortcut
+            init_state();
+            game_manager.update(state);
+            physics_time = 0.0f;
+            continue;
         }
-        if (!mission.player_ai) copy_control(window, player_drone(state).control_m);
+        if (!mission.player_ai) copy_control(window, settings, player_drone(state).control_m);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
             ai.update(state);
@@ -414,4 +424,7 @@ void game_loop(Window& window, const Mission& mission) {
         audio_engine.update(state);
     }
     window.set_audio_callback({});  // the window's callback can still call into the audio_engine
+    result.time = float(state.timer.value_or(0)) * Physics::dt;
+    result.score = state.kill_count;
+    return result;
 }

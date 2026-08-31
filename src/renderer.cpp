@@ -1599,6 +1599,242 @@ struct FpsView {
     }
 };
 
+////////////////////////////////////////////////////////////////////////////////
+// Menu layout & view
+
+struct MenuView {
+    struct Item {
+        enum Type : uint8_t { Plain };
+        Type kind;
+        const char* label;
+        const char* value;
+        bool enabled;
+        float row_bottom;
+    };
+    const char* title;
+    const char* footer;
+    std::vector<Item> items;
+    Vec<2> font_size;
+    float line_h;
+    float margin;
+
+    void add(Item::Type type, const char* label, const char* value = nullptr, bool enabled = true) {
+        items.push_back({type, label, value, enabled, 0.0f});
+    }
+
+    int row_hit(Vec<2> vp, Vec<2> mouse) {
+        if (mouse[0] < margin || mouse[0] > vp[0] - margin) return -1;
+        for (uint i = 0; i < items.size(); ++i) {
+            if (mouse[1] >= items[i].row_bottom && mouse[1] < items[i].row_bottom + line_h)
+                return int(i);
+        }
+        return -1;
+    }
+};
+
+std::string fmt_str(float f, const char* spec) {
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), spec, f);
+    return buf;
+}
+
+std::string fmt_int(uint n) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%u", n);
+    return buf;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Menus view
+
+struct Menus {
+    static constexpr float label_scale = 1.5f;
+    static constexpr float line_height_scale = 1.2f * label_scale;
+
+    Mesh quad;
+    MenuView view;
+    ShellState::Screen prev_screen = ShellState::Screen::count;
+    int cursor = 0;
+
+    void update(Window& window, ShellState& shell, const TextBatch& text) {
+        shell.result = ShellState::Result::None;
+        if (prev_screen != shell.screen) {
+            prev_screen = shell.screen;
+            cursor = 0;
+        }
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float vp_w = float(vp[2]);
+        const float vp_h = float(vp[3]);
+
+        // Re-layout the MenuView
+        view = {};
+        view.font_size = text.base_font_size();
+        view.line_h = line_height_scale * view.font_size[1];
+        view.margin = 0.15f * std::min(vp_w, vp_h);
+        switch (shell.screen) {
+            case ShellState::Screen::Main:
+                view.title = "SMALL GAME";
+                view.footer = "up/down: move | enter: select | esc: quit";
+                view.add(MenuView::Item::Plain, "Play");
+                view.add(MenuView::Item::Plain, "Quit");
+                break;
+            case ShellState::Screen::Missions: {
+                view.title = "MISSIONS";
+                view.footer = "esc: back | complete a mission to unlock the next";
+                std::vector<std::string> labels(shell.missions.size());
+                std::vector<std::string> values(shell.missions.size());
+                for (size_t i = 0; i < shell.missions.size(); ++i) {
+                    auto& ms = shell.missions[i];
+                    labels[i] = ms.name;
+                    if (!ms.unlocked) {
+                        values[i] = "locked";
+                    } else if (ms.best.type != MissionResult::Completed) {
+                        values[i] = "new";
+                    } else {
+                        values[i] = "best";
+                        if (ms.best.time > 0.0f) values[i] += " " + fmt_str(ms.best.time, "%.1fs");
+                        if (ms.best.score > 0) values[i] += " " + fmt_int(ms.best.score);
+                    }
+                    view.add(MenuView::Item::Plain, labels[i].c_str(), values[i].c_str(),
+                             ms.unlocked);
+                }
+                break;
+            }
+            default:
+                gassert(false && "unexpected menu screen");
+                break;
+        }
+        for (uint i = 0; i < view.items.size(); ++i)
+            view.items[i].row_bottom = vp_h - view.margin - float(i + 1) * view.line_h;
+
+        // Update the cursor
+
+        int hover = view.row_hit({vp_w, vp_h}, window.mouse_pos());
+        if (hover >= 0 && view.items[size_t(hover)].enabled) cursor = hover;
+        // Keyboard navigation skips disabled rows
+        auto move_cursor = [&](int dir) {
+            const int n = int(view.items.size());
+            for (int step = 1; step <= n; ++step) {
+                const int c = int((cursor + dir * step + n) % n);
+                if (view.items[size_t(c)].enabled) {
+                    cursor = c;
+                    return;
+                }
+            }
+        };
+        if (window.pressed(Key::up)) move_cursor(-1);
+        if (window.pressed(Key::down)) move_cursor(1);
+        cursor = std::clamp(cursor, 0, std::max(0, int(view.items.size()) - 1));
+
+        // Handle selection
+        bool click = (window.mouse_pressed(1) && hover >= 0 && hover == cursor) ||
+                     window.pressed(Key::enter) || window.pressed(Key::space);
+        click &= view.items[size_t(cursor)].enabled;
+        if (click) {
+            switch (shell.screen) {
+                case ShellState::Screen::Main:
+                    if (cursor == 0) {
+                        shell.screen = ShellState::Screen::Missions;
+                    } else if (cursor == 1) {
+                        shell.result = ShellState::Result::Quit;
+                    }
+                    break;
+                case ShellState::Screen::Missions:
+                    gassert(shell.missions[size_t(cursor)].unlocked);
+                    shell.chosen = Mission::all()[size_t(cursor)];
+                    shell.result = ShellState::Result::Play;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        // Handle ESC navigation
+        if (window.pressed(Key::esc)) {
+            switch (shell.screen) {
+                case ShellState::Screen::Main:
+                    shell.result = ShellState::Result::Quit;
+                    break;
+                default:
+                    shell.screen = ShellState::Screen::Main;
+                    break;
+            }
+        }
+    }
+
+    void draw(TextBatch& text, FlatShader& flat) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float vp_w = float(vp[2]);
+        const float vp_h = float(vp[3]);
+        glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        auto draw_rect = [&](float x0, float y0, float x1, float y1, const Vec<3>& color,
+                             float alpha) {
+            const std::vector<Vec<2>> verts{{x0, y0}, {x1, y0}, {x1, y1},
+                                            {x0, y0}, {x1, y1}, {x0, y1}};
+            quad.set_vertices(verts, 2);
+            flat.prog.use();
+            flat.u_use_instancing.set(0);
+            flat.u_radius.set(0.0f);
+            flat.u_inner.set(0.0f);
+            flat.u_scale.set(1.0f);
+            flat.u_translate.set(Vec<2>{0.0f, 0.0f});
+            flat.u_alpha.set(alpha);
+            flat.u_color.set(color);
+            flat.u_mvp.set(mat_ortho(0.0f, vp_w, 0.0f, vp_h));
+            glDisable(GL_DEPTH_TEST);
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            quad.draw();
+            glDisable(GL_BLEND);
+            glEnable(GL_DEPTH_TEST);
+        };
+        const Vec<3> dim{0.45f, 0.45f, 0.45f};
+        const Vec<3> lit{0.35f, 0.8f, 1.0f};
+
+        // Cursor highlight bar (only over an enabled row)
+        if (cursor >= 0 && cursor < int(view.items.size()) && view.items[size_t(cursor)].enabled) {
+            const float yb = view.items[size_t(cursor)].row_bottom + 0.15f * view.line_h;
+            draw_rect(view.margin, yb, vp_w - view.margin, yb + 0.7f * view.line_h,
+                      Vec<3>{0.3f, 0.6f, 1.0f}, 0.12f);
+        }
+
+        // Title
+        if (view.title && *view.title) {
+            const float ts = 2.0f;
+            const float tw = float(std::strlen(view.title)) * view.font_size[0] * ts;
+            text.draw(view.title, vp_w / 2.0f - tw / 2.0f, vp_h - view.margin + view.line_h, ts,
+                      {1.0f, 1.0f, 1.0f});
+        }
+
+        // Rows
+        for (size_t i = 0; i < view.items.size(); ++i) {
+            const MenuView::Item& item = view.items[i];
+            const float yb = item.row_bottom;
+            const bool hover = int(i) == cursor;
+            const Vec<3> label_col = !item.enabled ? dim : (hover ? lit : Vec<3>{1.0f, 1.0f, 1.0f});
+            text.draw(item.label, view.margin, yb, label_scale, label_col);
+
+            if (item.value && *item.value) {
+                const float vw = float(std::strlen(item.value)) * view.font_size[0] * label_scale;
+                const Vec<3> val_col = !item.enabled ? dim : Vec<3>{0.85f, 0.85f, 0.85f};
+                text.draw(item.value, vp_w - view.margin - vw, yb, label_scale, val_col);
+            }
+        }
+
+        // Footer
+        if (view.footer && *view.footer) {
+            const float fw = float(std::strlen(view.footer)) * view.font_size[0];
+            text.draw(view.footer, vp_w / 2.0f - fw / 2.0f, 0.5f * view.margin, 1.0f,
+                      {0.6f, 0.6f, 0.6f});
+        }
+    }
+};
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1621,6 +1857,9 @@ struct Renderer::State {
 
     // State
     Mat4 projection;
+
+    // Menus
+    Menus menus;
 
     State() : terrain(phong), drone(phong) {
         projection = mat_perspective(fov_deg * deg_to_rad, 16.0f / 9.0f, 0.1f, 1000.0f);
@@ -1654,4 +1893,9 @@ void Renderer::draw(const GameState& s, float dt) {
     state->hud.draw(s, state->text);
     if (player.status != Drone::Status::Alive) state->overlay.draw(s, state->text);
     state->fps.draw(dt, state->text);
+}
+
+void Renderer::menu_update_draw(Window& window, ShellState& shell) {
+    state->menus.update(window, shell, state->text);
+    state->menus.draw(state->text, state->flat);
 }

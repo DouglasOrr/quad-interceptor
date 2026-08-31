@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+
+#include "maths.hpp"
 
 #define FOREACH_GL_FUNCTION(OP)                                                             \
     OP(GLuint, glCreateShader, GLenum)                                                      \
@@ -69,6 +72,7 @@ enum class Key : uint8_t {
     period,
     esc,
     hash,
+    enter,
     count,
 };
 
@@ -86,6 +90,9 @@ struct Window {
     struct State;
     inline static constexpr int audio_sample_rate = 44100;
 
+    static void init();
+    static std::string pref_path(const char* app_name);  // user-preferences dir, or "" on failure
+
     Window(const WindowSettings& settings);
     ~Window();
 
@@ -98,11 +105,29 @@ struct Window {
     // Query whether a key was pressed (transition from not held to held) in the most recent frame()
     bool pressed(Key k) const;
 
+    // Raw scancode queries (values are SDL_Scancode)
+    bool scancode_held(int sc) const;
+    bool scancode_pressed(int sc) const;
+    // First scancode transitioned to held this frame, if any
+    std::optional<int> scancode_pressed_any() const;
+
+    // Mouse position in drawable pixels, y-up (to match GL), + button state
+    Vec<2> mouse_pos() const;
+    bool mouse_held(uint button) const;
+    bool mouse_pressed(uint button) const;
+
+    void set_vsync(bool vsync);
+    void set_mode(WindowMode mode);
+
     void set_audio_callback(std::function<void(int16_t* stream, int num_frames)> callback);
+
+    void test_press_after(Key key, float seconds);  // keyboard injection for tests
 
 private:
     std::unique_ptr<State> state;
 };
+
+const char* scancode_name(int sc);  // e.g. "Return", "Left"
 
 struct Stopwatch {
     uint64_t start;

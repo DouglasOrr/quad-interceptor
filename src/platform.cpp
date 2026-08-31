@@ -1,4 +1,5 @@
 #include <SDL.h>
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdio>
@@ -20,8 +21,15 @@ struct Window::State {
     SDL_AudioDeviceID audio_dev = 0;
     std::function<void(int16_t* stream, int num_frames)> audio_callback;
     bool started = false;
-    std::array<bool, static_cast<size_t>(Key::count)> held_keys{};
-    std::array<bool, static_cast<size_t>(Key::count)> prev_held_keys{};
+    bool quit = false;
+    std::array<Uint8, SDL_NUM_SCANCODES> keys{};
+    std::array<Uint8, SDL_NUM_SCANCODES> prev_keys{};
+    std::array<Uint8, 4> mouse{};  // index = SDL button (1..3)
+    std::array<Uint8, 4> prev_mouse{};
+    Vec<2> mouse_pos{};
+    SDL_Scancode test_scancode = SDL_NUM_SCANCODES;
+    float test_delay = 0.0f;
+    uint64_t test_trigger_time = 0;
 
     // Profiling
     std::string profile_path;
@@ -74,14 +82,27 @@ static void open_audio_device(Window::State* state) {
 
 // Order must match the `Key` enum in platform.hpp.
 static constexpr SDL_Scancode key_scancodes[] = {
-    SDL_SCANCODE_W,      SDL_SCANCODE_A,     SDL_SCANCODE_S,      SDL_SCANCODE_D,
-    SDL_SCANCODE_Q,      SDL_SCANCODE_E,     SDL_SCANCODE_C,      SDL_SCANCODE_SPACE,
-    SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LEFT,  SDL_SCANCODE_RIGHT,  SDL_SCANCODE_UP,
-    SDL_SCANCODE_DOWN,   SDL_SCANCODE_X,     SDL_SCANCODE_Z,      SDL_SCANCODE_LCTRL,
-    SDL_SCANCODE_LALT,   SDL_SCANCODE_COMMA, SDL_SCANCODE_PERIOD, SDL_SCANCODE_ESCAPE,
-    SDL_SCANCODE_3,
+    SDL_SCANCODE_W,      SDL_SCANCODE_A,      SDL_SCANCODE_S,      SDL_SCANCODE_D,
+    SDL_SCANCODE_Q,      SDL_SCANCODE_E,      SDL_SCANCODE_C,      SDL_SCANCODE_SPACE,
+    SDL_SCANCODE_LSHIFT, SDL_SCANCODE_LEFT,   SDL_SCANCODE_RIGHT,  SDL_SCANCODE_UP,
+    SDL_SCANCODE_DOWN,   SDL_SCANCODE_X,      SDL_SCANCODE_Z,      SDL_SCANCODE_LCTRL,
+    SDL_SCANCODE_LALT,   SDL_SCANCODE_COMMA,  SDL_SCANCODE_PERIOD, SDL_SCANCODE_ESCAPE,
+    SDL_SCANCODE_3,      SDL_SCANCODE_RETURN,
 };
 static_assert(std::size(key_scancodes) == static_cast<size_t>(Key::count));
+
+void Window::init() {
+    (void)SDL_Init(0);
+}
+
+std::string Window::pref_path(const char* app_name) {
+    if (char* pref = SDL_GetPrefPath(app_name, ""); pref) {
+        std::string path = pref;
+        SDL_free(pref);
+        return path;
+    }
+    return "";
+}
 
 Window::Window(const WindowSettings& settings) : state(std::make_unique<State>()) {
     state->profile_path = settings.profile_path;
@@ -154,6 +175,7 @@ Window::~Window() {
 }
 
 bool Window::frame() {
+    if (state->quit) return false;  // quit once latched, keep reporting it
     if (state->started) {
         const uint64_t swap_start = SDL_GetPerformanceCounter();
         SDL_GL_SwapWindow(state->window);
@@ -177,10 +199,16 @@ bool Window::frame() {
     }
     state->started = true;
 
+    // Snapshot previous inputs, then fold in this frame's events.
+    state->prev_keys = state->keys;
+    state->prev_mouse = state->mouse;
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT) return false;
-        if (event.type == SDL_KEYDOWN && event.key.keysym.sym == SDLK_ESCAPE) return false;
+        if (event.type == SDL_QUIT) {
+            state->quit = true;
+            return false;
+        }
         if (event.type == SDL_AUDIODEVICEREMOVED && event.adevice.which == state->audio_dev) {
             SDL_CloseAudioDevice(state->audio_dev);
             state->audio_dev = 0;
@@ -189,34 +217,121 @@ bool Window::frame() {
             !event.adevice.iscapture) {
             open_audio_device(state.get());
         }
-    }
-    state->prev_held_keys = state->held_keys;
-    int numkeys = 0;
-    const Uint8* kb = SDL_GetKeyboardState(&numkeys);
-    for (size_t i = 0; i < state->held_keys.size(); ++i) {
-        SDL_Scancode sc = key_scancodes[i];
-        if (sc == SDL_SCANCODE_3) {
-            state->held_keys[i] =
-                (sc < numkeys && kb[sc]) ||
-                (SDL_SCANCODE_NONUSHASH < numkeys && kb[SDL_SCANCODE_NONUSHASH]) ||
-                (SDL_SCANCODE_BACKSLASH < numkeys && kb[SDL_SCANCODE_BACKSLASH]);
-        } else {
-            state->held_keys[i] = sc < numkeys && kb[sc];
+        if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button < state->mouse.size()) {
+            state->mouse[event.button.button] = 1;
+        }
+        if (event.type == SDL_MOUSEBUTTONUP && event.button.button < state->mouse.size()) {
+            state->mouse[event.button.button] = 0;
         }
     }
-    int w, h;
-    SDL_GL_GetDrawableSize(state->window, &w, &h);
-    glViewport(0, 0, w, h);
+
+    // Authoritative input state: keyboard array + mouse buttons/size.
+    int numkeys = 0;
+    const Uint8* kb = SDL_GetKeyboardState(&numkeys);
+    for (int sc = 0; sc < SDL_NUM_SCANCODES; ++sc) {
+        state->keys[sc] = (sc < numkeys) ? kb[sc] : 0;
+    }
+
+    // Test hook: applies a scheduled single-frame key press once.
+    if (state->test_scancode < SDL_NUM_SCANCODES) {
+        const uint64_t freq = SDL_GetPerformanceFrequency();
+        const uint64_t now = SDL_GetPerformanceCounter();
+        if (state->test_trigger_time == 0)
+            state->test_trigger_time = uint64(now + freq * state->test_delay);
+        if (now >= state->test_trigger_time) {
+            state->keys[state->test_scancode] = 1;
+            state->test_scancode = SDL_NUM_SCANCODES;
+        }
+    }
+
+    int mx, my;
+    Uint32 mask = SDL_GetMouseState(&mx, &my);
+    for (uint b = 1; b < state->mouse.size(); ++b) {
+        state->mouse[b] = (mask & SDL_BUTTON(b)) ? 1 : 0;
+    }
+    int ww = 0, wh = 0, wd = 0, hd = 0;
+    SDL_GetWindowSize(state->window, &ww, &wh);
+    SDL_GL_GetDrawableSize(state->window, &wd, &hd);
+    const float sx = ww > 0 ? float(wd) / float(ww) : 1.0f;
+    const float sy = wh > 0 ? float(hd) / float(wh) : 1.0f;
+    state->mouse_pos = {std::max(0.0f, float(mx) * sx), std::max(0.0f, float(hd) - float(my) * sy)};
+    glViewport(0, 0, wd, hd);
     return true;
 }
 
 bool Window::held(Key k) const {
-    return state->held_keys[static_cast<size_t>(k)];
+    const auto& st = *state;
+    auto down = [&](SDL_Scancode sc) { return sc < SDL_NUM_SCANCODES && st.keys[sc]; };
+    if (k == Key::hash) {
+        return down(SDL_SCANCODE_3) || down(SDL_SCANCODE_NONUSHASH) || down(SDL_SCANCODE_BACKSLASH);
+    }
+    return down(key_scancodes[static_cast<size_t>(k)]);
 }
 
 bool Window::pressed(Key k) const {
-    size_t idx = static_cast<size_t>(k);
-    return state->held_keys[idx] && !state->prev_held_keys[idx];
+    const auto& st = *state;
+    auto pressed_sc = [&](SDL_Scancode sc) {
+        return sc < SDL_NUM_SCANCODES && st.keys[sc] && !st.prev_keys[sc];
+    };
+    if (k != Key::hash) return pressed_sc(key_scancodes[static_cast<size_t>(k)]);
+    const auto was_down = [&](SDL_Scancode sc) {
+        return sc < SDL_NUM_SCANCODES && st.prev_keys[sc];
+    };
+    const bool now_down = held(k);
+    const bool was_down_any = was_down(SDL_SCANCODE_3) || was_down(SDL_SCANCODE_NONUSHASH) ||
+                              was_down(SDL_SCANCODE_BACKSLASH);
+    return now_down && !was_down_any;
+}
+
+bool Window::scancode_held(int sc) const {
+    return sc >= 0 && sc < SDL_NUM_SCANCODES && state->keys[sc];
+}
+
+bool Window::scancode_pressed(int sc) const {
+    return sc >= 0 && sc < SDL_NUM_SCANCODES && state->keys[sc] && !state->prev_keys[sc];
+}
+
+std::optional<int> Window::scancode_pressed_any() const {
+    for (int sc = 1; sc < SDL_NUM_SCANCODES; ++sc) {
+        if (state->keys[sc] && !state->prev_keys[sc]) return sc;
+    }
+    return std::nullopt;
+}
+
+Vec<2> Window::mouse_pos() const {
+    return state->mouse_pos;
+}
+
+bool Window::mouse_held(uint button) const {
+    return button < state->mouse.size() && state->mouse[button];
+}
+
+bool Window::mouse_pressed(uint button) const {
+    return button < state->mouse.size() && state->mouse[button] && !state->prev_mouse[button];
+}
+
+void Window::set_vsync(bool vsync) {
+    SDL_GL_SetSwapInterval(vsync ? 1 : 0);
+}
+
+void Window::test_press_after(Key key, float seconds) {
+    state->test_scancode = key_scancodes[static_cast<size_t>(key)];
+    state->test_delay = seconds;
+    state->test_trigger_time = 0;
+}
+
+void Window::set_mode(WindowMode mode) {
+    if (SDL_SetWindowFullscreen(
+            state->window, mode == WindowMode::Fullscreen ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0) !=
+        0) {
+        std::fprintf(stderr, "window: failed to set mode: %s\n", SDL_GetError());
+    }
+}
+
+const char* scancode_name(int sc) {
+    const char* name =
+        sc >= 0 && sc < SDL_NUM_SCANCODES ? SDL_GetScancodeName(SDL_Scancode(sc)) : "?";
+    return *name ? name : "?";
 }
 
 void Window::set_audio_callback(std::function<void(int16_t* stream, int num_frames)> callback) {
