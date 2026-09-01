@@ -288,14 +288,15 @@ ShellState load_shell(const std::string& dir) {
         .chosen{},
         .missions{},
     };
-    std::ifstream in(dir + "/" + progress_file);
     const auto all_missions = Mission::all();
     for (auto& m : all_missions) {
         shell.missions.push_back(
-            {.name = m.name, .best = {MissionResult::None, 0.0f, 0u}, .unlocked = true});
+            {.name = m.name, .best = {MissionResult::None, 0.0f, 0u}, .unlocked = false});
     }
+    shell.missions.front().unlocked = true;  // first mission always unlocked
     auto current_mission = shell.missions.end();
     std::string line;
+    std::ifstream in(dir + "/" + progress_file);
     while (std::getline(in, line)) {
         line = trim(line);
         if (line.empty() || line[0] == '#') continue;
@@ -336,6 +337,10 @@ ShellState load_shell(const std::string& dir) {
             int sc = 0;
             parse_int(value, sc, bad_line, progress_file);
             if (!bad_line) current_mission->best.score = uint(std::max(0, sc));
+        } else if (key == "unlocked") {
+            bool b = false;
+            parse_bool(value, b, bad_line, progress_file);
+            if (!bad_line) current_mission->unlocked = current_mission->unlocked || b;
         }
     }
     return shell;
@@ -357,10 +362,31 @@ void save_shell(ShellState& shell, const std::string& dir) {
         out << "completed=" << (m.best.type == MissionResult::Completed ? "true" : "false") << '\n';
         out << "best_time=" << fmt_float(m.best.time) << '\n';
         out << "best_score=" << m.best.score << '\n';
+        out << "unlocked=" << (m.unlocked ? "true" : "false") << '\n';
+    }
+}
+
+void record_result(ShellState& shell, const Mission& mission, const MissionResult& result) {
+    auto it = std::find_if(shell.missions.begin(), shell.missions.end(),
+                           [&](auto& m) { return m.name == mission.name; });
+    if (it == shell.missions.end()) return;
+    if (result.type == MissionResult::Completed) it->best.type = MissionResult::Completed;
+    if (result.time > 0.0f && (it->best.time == 0.0f || result.time < it->best.time))
+        it->best.time = result.time;
+    if (result.score > it->best.score) it->best.score = result.score;
+    if (result.type == MissionResult::Completed) {
+        const size_t idx = size_t(it - shell.missions.begin());
+        if (idx + 1 < shell.missions.size()) shell.missions[idx + 1].unlocked = true;
     }
 }
 
 }  // namespace
+
+void shell_unlock_all(ShellState& shell) {
+    for (auto& m : shell.missions)
+        m.unlocked = true;
+    save_shell(shell, get_config_dir());
+}
 
 void shell_loop(Window& window, Settings& settings) {
     auto config_dir = get_config_dir();
@@ -370,11 +396,14 @@ void shell_loop(Window& window, Settings& settings) {
     while (window.frame()) {
         renderer.menu_update_draw(window, shell, settings, /*overlay*/ false);
         switch (shell.navigation) {
-            case ShellState::Navigation::Play:
-                game_loop(window, renderer, settings, shell.chosen);
+            case ShellState::Navigation::Play: {
+                auto result = game_loop(window, renderer, settings, shell.chosen);
+                record_result(shell, shell.chosen, result);
+                save_shell(shell, config_dir);
                 shell.screen = ShellState::Screen::Missions;
                 shell.navigation = ShellState::Navigation::None;
                 break;
+            }
             case ShellState::Navigation::Quit:
                 save_shell(shell, config_dir);
                 return;

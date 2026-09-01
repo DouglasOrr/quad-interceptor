@@ -274,6 +274,7 @@ struct ShellState {
 };
 
 std::string get_config_dir();
+void shell_unlock_all(ShellState&);
 void shell_loop(Window&, Settings&);
 
 ///////////////////////////////////////////////////////////////////////////////

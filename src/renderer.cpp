@@ -1716,7 +1716,8 @@ struct MenuView {
         int index = 0;                                     // Choice selected option index
         std::vector<std::pair<std::string, int>> options;  // Choice: (label, value)
         int data = 0;                                      // KeyBinding: Action::Type of this row
-        int preset = -1;  // Controls preset: control_presets() index
+        int preset = -1;          // Controls preset: control_presets() index
+        bool unlock_all = false;  // Missions "Unlock all" row
         float row_bottom = 0.0f;
     };
     const char* title = nullptr;
@@ -1785,6 +1786,14 @@ MenuView::Item spacer_item() {
     MenuView::Item it;
     it.type = MenuView::Item::Plain;
     it.enabled = false;
+    return it;
+}
+
+MenuView::Item unlock_all_item() {
+    MenuView::Item it;
+    it.type = MenuView::Item::Plain;
+    it.label = "Unlock all";
+    it.unlock_all = true;
     return it;
 }
 
@@ -1864,6 +1873,8 @@ struct Menus {
                     }
                     view.items.push_back(std::move(it));
                 }
+                view.items.push_back(spacer_item());
+                view.items.push_back(unlock_all_item());
                 view.items.push_back(spacer_item());
                 view.items.push_back(plain_item("Back"));
                 break;
@@ -2055,7 +2066,12 @@ struct Menus {
                     shell.navigation = ShellState::Navigation::Quit;
                 }
                 break;
-            case ShellState::Screen::Missions:
+            case ShellState::Screen::Missions: {
+                const auto& m_item = view.items[size_t(cursor)];
+                if (m_item.unlock_all) {
+                    shell_unlock_all(shell);
+                    return true;  // rebuild the view with the fresh lock state
+                }
                 if (cursor == int(view.items.size()) - 1) {  // Back row
                     shell.screen = ShellState::Screen::Main;
                 } else {
@@ -2064,6 +2080,7 @@ struct Menus {
                     shell.navigation = ShellState::Navigation::Play;
                 }
                 break;
+            }
             case ShellState::Screen::Pause:
                 if (cursor == 0) {
                     shell.navigation = ShellState::Navigation::Resume;
