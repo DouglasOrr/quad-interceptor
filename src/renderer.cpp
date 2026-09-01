@@ -1615,7 +1615,7 @@ struct MenuView {
         int index = 0;                                     // Choice selected option index
         std::vector<std::pair<const char*, int>> options;  // Choice: (label, value)
         int data = 0;                                      // KeyBinding: Action::Type of this row
-        bool reset = false;                                // Controls "Reset to defaults" row
+        int preset = -1;                                   // Controls preset: control_presets() index
         float row_bottom = 0.0f;
     };
     const char* title = nullptr;
@@ -1687,11 +1687,11 @@ MenuView::Item spacer_item() {
     return it;
 }
 
-MenuView::Item reset_item() {
+MenuView::Item preset_item(const char* label, int index) {
     MenuView::Item it;
     it.type = MenuView::Item::Plain;
-    it.label = "Reset to defaults";
-    it.reset = true;
+    it.label = label;
+    it.preset = index;
     return it;
 }
 
@@ -1819,9 +1819,11 @@ struct Menus {
                                                          scancode_name(settings.bindings[a]),
                                                          int(a)));
                 }
-                view.items.push_back(spacer_item());  // before Reset to defaults
-                view.items.push_back(reset_item());
-                view.items.push_back(spacer_item());  // after Reset to defaults
+                view.items.push_back(spacer_item());  // before the presets
+                const auto presets = Settings::control_presets();
+                for (uint p = 0; p < presets.size(); ++p)
+                    view.items.push_back(preset_item(std::get<0>(presets[p]).c_str(), int(p)));
+                view.items.push_back(spacer_item());  // after the presets
                 view.items.push_back(plain_item("Back"));
                 break;
             }
@@ -1962,8 +1964,10 @@ struct Menus {
             default:
                 break;
         }
-        if (shell.screen == ShellState::Screen::Controls && view.items[size_t(cursor)].reset) {
-            settings.bindings = Settings::defaults().bindings;  // reset to defaults row
+        if (shell.screen == ShellState::Screen::Controls && item.preset >= 0) {
+            const auto presets = Settings::control_presets();
+            gassert(size_t(item.preset) < presets.size());
+            settings.bindings = std::get<1>(presets[size_t(item.preset)]);
             settings.save(get_config_dir());
             return true;
         }

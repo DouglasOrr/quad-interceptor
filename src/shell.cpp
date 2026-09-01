@@ -151,17 +151,46 @@ Settings Settings::defaults() {
     s.master_volume = 1.0f;
     s.music_volume = 0.5f;
     s.effects_volume = 0.5f;
-    s.bindings = {
-        SDL_SCANCODE_LEFT,   // RollLeft
-        SDL_SCANCODE_RIGHT,  // RollRight
-        SDL_SCANCODE_UP,     // PitchFwd
-        SDL_SCANCODE_DOWN,   // PitchBack
-        SDL_SCANCODE_X,      // LiftUp
-        SDL_SCANCODE_LALT,   // LiftDown
-        SDL_SCANCODE_Z,      // YawLeft
-        SDL_SCANCODE_C,      // YawRight
-    };
+    s.bindings = std::get<1>(Settings::control_presets().front());
     return s;
+}
+
+std::vector<std::tuple<std::string, Settings::Bindings>> Settings::control_presets() {
+    return {
+        {"Preset - WASD/IJKL",
+         {
+             SDL_SCANCODE_J,
+             SDL_SCANCODE_L,
+             SDL_SCANCODE_I,
+             SDL_SCANCODE_K,
+             SDL_SCANCODE_W,
+             SDL_SCANCODE_S,
+             SDL_SCANCODE_A,
+             SDL_SCANCODE_D,
+         }},
+        {"Preset - WASD/IJKL (rev)",
+         {
+             SDL_SCANCODE_A,
+             SDL_SCANCODE_D,
+             SDL_SCANCODE_W,
+             SDL_SCANCODE_S,
+             SDL_SCANCODE_I,
+             SDL_SCANCODE_K,
+             SDL_SCANCODE_J,
+             SDL_SCANCODE_L,
+         }},
+        {"Preset - Arrows",
+         {
+             SDL_SCANCODE_LEFT,
+             SDL_SCANCODE_RIGHT,
+             SDL_SCANCODE_UP,
+             SDL_SCANCODE_DOWN,
+             SDL_SCANCODE_X,
+             SDL_SCANCODE_LALT,
+             SDL_SCANCODE_Z,
+             SDL_SCANCODE_C,
+         }},
+    };
 }
 
 Settings::LoadResult Settings::load(const std::string& dir) {

@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -217,6 +218,7 @@ struct Action {
 };
 
 struct Settings {
+    using Bindings = std::array<int, size_t(Action::count)>;  // SDL_Scancode values
     enum class LoadResult { OK, NoFile, Error };
 
     bool fullscreen;
@@ -225,9 +227,10 @@ struct Settings {
     float master_volume;
     float music_volume;
     float effects_volume;
-    std::array<int, size_t(Action::count)> bindings;  // SDL_Scancode values
+    Bindings bindings;
 
     static Settings defaults();
+    static std::vector<std::tuple<std::string, Bindings>> control_presets();
     LoadResult load(const std::string& dir);
     void save(const std::string& dir) const;
 };
