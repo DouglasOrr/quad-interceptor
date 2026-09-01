@@ -166,15 +166,17 @@ struct Terrain {
 };
 
 struct Mission {
-    enum Type { Defense, Sandbox, Race, Chase };
+    enum Type { Defense, Sandbox, Race, Tutorial, Chase };
     Type type;
     std::string name;
+    std::string info;
     uint64 seed;
     TerrainType terrain_type;
     DroneType player_type;
     std::vector<Circle> objectives;  // empty in sandbox
     float enemy_spawn_radius;        // around objective (defense) or player (sandbox, chase)
     float enemy_spawn_interval;
+    float enemy_tilt;
     uint max_enemies;
     uint starting_lives;
     float time_limit;

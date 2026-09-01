@@ -1327,14 +1327,16 @@ void main(){
 
         // Objective rings
         for (size_t i = 0; i < s.mission.objectives.size(); ++i) {
+            if (i < s.next_objective) continue;  // already visited
             const Circle& o = s.mission.objectives[i];
             flat.u_radius.set(R);
             flat.u_scale.set(o.radius);
             flat.u_translate.set(Vec<2>{o.center[0] - p[0], o.center[1] - p[1]});
-            Vec<3> color = (s.mission.type != Mission::Race) ? Vec<3>{0.2f, 0.9f, 0.4f}
-                           : (i == s.next_objective)         ? Vec<3>{0.2f, 0.9f, 0.4f}
-                           : (i == s.next_objective + 1)     ? Vec<3>{0.95f, 0.85f, 0.2f}
-                                                             : Vec<3>{0.5f, 0.5f, 0.5f};
+            Vec<3> color = (s.mission.type != Mission::Race && s.mission.type != Mission::Tutorial)
+                               ? Vec<3>{0.2f, 0.9f, 0.4f}
+                           : (i == s.next_objective)     ? Vec<3>{0.2f, 0.9f, 0.4f}
+                           : (i == s.next_objective + 1) ? Vec<3>{0.95f, 0.85f, 0.2f}
+                                                         : Vec<3>{0.5f, 0.5f, 0.5f};
             flat.u_color.set(color);
             ring.draw();
         }
@@ -1507,6 +1509,46 @@ void main(){
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
             text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
         }
+
+        // Tutorial: long help text wrapped across the bottom of the screen, kept
+        // clear of the attitude indicator / left info column and the minimap.
+        if (s.mission.type == Mission::Tutorial && !s.mission.info.empty()) {
+            const float hud_col_chars = 12.0f;
+            const float info_scale = 1.0f;
+
+            const float minimap_size = min_dim * minimap_size_ratio;
+            const float x_left =
+                3.0f * float(pad) + float(attitude_size) + hud_col_chars * font_size[0];
+            const float x_right = float(vp[2]) - minimap_size - 2 * float(pad);
+            const uint max_chars =
+                std::max(1u, uint((x_right - x_left) / (font_size[0] * info_scale)));
+
+            // Line wrapping
+            std::vector<std::string> lines;
+            for (size_t start = 0; start < s.mission.info.size();) {
+                size_t end = std::min(start + max_chars, s.mission.info.size());
+                if (end == s.mission.info.size()) {
+                    lines.push_back(s.mission.info.substr(start));
+                    break;
+                }
+                size_t cut = s.mission.info.rfind(' ', end);
+                if (cut == std::string::npos || cut <= start) {  // no word break: hard cut
+                    lines.push_back(s.mission.info.substr(start, max_chars));
+                    start += max_chars;
+                } else {
+                    lines.push_back(s.mission.info.substr(start, cut - start));
+                    start = cut + 1;
+                    while (start < s.mission.info.size() && s.mission.info[start] == ' ')
+                        ++start;
+                }
+            }
+            // Render
+            const float info_line_h = font_size[1] * info_scale * 1.2f;
+            for (size_t i = 0; i < lines.size(); ++i) {
+                const float y = float(pad) + float(lines.size() - 1 - i) * info_line_h;
+                text.draw(lines[i].c_str(), x_left, y, info_scale, {0.6f, 0.9f, 0.6f});
+            }
+        }
     }
 };
 
@@ -1608,11 +1650,13 @@ struct ObjectiveView {
         flat.u_translate.set(Vec<2>{0, 0});
 
         for (size_t i = 0; i < s.mission.objectives.size(); ++i) {
+            if (i < s.next_objective) continue;  // already visited
             const Circle& o = s.mission.objectives[i];
-            Vec<4> color = (s.mission.type != Mission::Race) ? Vec<4>{0.2f, 0.85f, 0.4f, 0.25f}
-                           : (i == s.next_objective)         ? Vec<4>{0.2f, 0.85f, 0.4f, 0.25f}
-                           : (i == s.next_objective + 1)     ? Vec<4>{0.95f, 0.85f, 0.2f, 0.25f}
-                                                             : Vec<4>{0.5f, 0.5f, 0.5f, 0.25f};
+            Vec<4> color = (s.mission.type != Mission::Race && s.mission.type != Mission::Tutorial)
+                               ? Vec<4>{0.2f, 0.85f, 0.4f, 0.25f}
+                           : (i == s.next_objective)     ? Vec<4>{0.2f, 0.85f, 0.4f, 0.25f}
+                           : (i == s.next_objective + 1) ? Vec<4>{0.95f, 0.85f, 0.2f, 0.25f}
+                                                         : Vec<4>{0.5f, 0.5f, 0.5f, 0.25f};
 
             flat.u_color.set(Vec<3>{color[0], color[1], color[2]});
             flat.u_alpha.set(color[3]);

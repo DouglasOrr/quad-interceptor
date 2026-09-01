@@ -173,6 +173,7 @@ std::vector<Mission> Mission::all() {
         proto.terrain_type = terrain;
         proto.player_type = default_player;
         proto.player_ai = false;
+        proto.enemy_tilt = 1.0f;
 
         Mission sandbox = proto;
         sandbox.type = Mission::Sandbox;
@@ -213,6 +214,34 @@ std::vector<Mission> Mission::all() {
         }
         missions.push_back(race);
 
+        Mission tutorial = proto;
+        tutorial.type = Mission::Tutorial;
+        tutorial.name = terrain.kind == TerrainType::Kind::Plains ? "plains/tutorial" : "tutorial";
+        tutorial.seed = 0x7a7a5e7ULL;
+        tutorial.starting_lives = 3;
+        tutorial.enemy_spawn_radius = 15.0f * Terrain::cell_size;
+        tutorial.enemy_spawn_interval = 20.0f;
+        tutorial.max_enemies = 1;
+        tutorial.enemy_tilt = 0.0f;
+        constexpr std::array<Vec<2>, 5> tutorial_path = {
+            {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {2.0f, 1.0f}, {2.0f, 2.0f}}};
+        for (auto u : tutorial_path) {
+            const float tutorial_span =
+                terrain.kind == TerrainType::Kind::Plains
+                    ? 20.0f * Terrain::cell_size
+                    : 2.0f * float(terrain.city.block_size) * Terrain::cell_size;
+            const Vec<2> p = tutorial_span * u;
+            tutorial.objectives.push_back(
+                {terrain.kind == TerrainType::Kind::City ? terrain.city.snap_intersection(p) : p,
+                 Terrain::cell_size});
+        }
+        tutorial.info =
+            "Learn to fly (acro mode) -- The controls are the same, but the drone now"
+            " keeps going in the direction you choose, until you change it."
+            " Have a play. Once you're happy, fly through the objective markers to complete"
+            " the mission.";
+        missions.push_back(tutorial);
+
         Mission chase = proto;
         chase.type = Mission::Chase;
         chase.name = terrain.kind == TerrainType::Kind::Plains ? "plains/chase" : "chase";
@@ -247,7 +276,7 @@ void GameManager::update(GameState& s) {
                     player_spawn(s, std::nullopt));
     auto& player = player_drone(s);
 
-    if (s.mission.time_limit > 0 && s.mission.type != Mission::Race) {
+    if (s.mission.type != Mission::Race && s.mission.time_limit > 0) {
         auto end_tick = uint64(s.mission.time_limit / Physics::dt);
         s.timer = (s.tick < end_tick) ? (end_tick - s.tick) : 0;
     }
@@ -266,26 +295,24 @@ void GameManager::update(GameState& s) {
             }
         }
     }
-    if (s.mission.type == Mission::Race) {
+    if (s.mission.type == Mission::Race || s.mission.type == Mission::Tutorial) {
         auto finished = s.next_objective >= s.mission.objectives.size();
-        if ((player.status == Drone::Status::Alive) && !finished) {
-            Vec<2> p_xy = {player.position[0], player.position[1]};
-            if (!s.timer) {
-                if (length(p_xy - s.mission.objectives[0].center) >
-                    s.mission.objectives[0].radius) {
-                    state->race_start_tick = s.tick;
-                    s.timer = 0;
-                    s.next_objective = 1;
-                }
-            } else {
-                if (length(p_xy - s.mission.objectives[s.next_objective].center) <=
-                    s.mission.objectives[s.next_objective].radius) {
-                    ++s.next_objective;
-                }
+        // Race timers
+        if (s.mission.type == Mission::Race) {
+            if (!s.timer.has_value()) {
+                state->race_start_tick = s.tick;
+                s.timer = 0;
+            }
+            if (!finished) {
+                s.timer = s.tick - state->race_start_tick;
             }
         }
-        if (s.timer && !finished) {
-            s.timer = s.tick - state->race_start_tick;
+        if ((player.status == Drone::Status::Alive) && !finished) {
+            Vec<2> p_xy = {player.position[0], player.position[1]};
+            auto next = s.mission.objectives[s.next_objective];
+            if (length(p_xy - next.center) <= next.radius) {
+                ++s.next_objective;
+            }
         }
     }
     if (s.mission.type == Mission::Chase) {

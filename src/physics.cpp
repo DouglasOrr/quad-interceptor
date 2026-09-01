@@ -575,9 +575,10 @@ void steer_drone(const GameState& s, DroneAI& a, Drone& d) {
                                fwd_xy[0] * desired[0] + fwd_xy[1] * desired[1]);
     d.control_m[3] = pid(a.yaw, a.yaw_state, 0.0f, yaw_err);
 
-    // Pitch - aim for a target nose-down angle (when facing the waypoint)
+    // Pitch - aim for a target nose-down angle (when facing the waypoint).
+    const float tilt = (d.kind == Drone::Kind::Enemy) ? s.mission.enemy_tilt : 1.0f;
     float target_pitch =
-        std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle;
+        std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle * tilt;
     auto pitch = attitude_pitch(d.orientation);
     d.control_m[1] = pid(a.pitch, a.pitch_state, target_pitch, pitch);
 
