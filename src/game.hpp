@@ -336,7 +336,7 @@ struct Renderer {
     Renderer();
     ~Renderer();
 
-    void draw(const GameState& state, float dt);
+    void draw(Window&, GameState&, float dt);
     void menu_update_draw(Window&, ShellState&, Settings&, bool overlay);
 
 private:

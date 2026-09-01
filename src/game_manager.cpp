@@ -407,7 +407,7 @@ MissionResult game_loop(Window& window,
     while (window.frame() && !abandoned) {
         const float dt = stopwatch.lap();
         if (state.paused) {
-            renderer.draw(state, dt);  // frozen scene
+            renderer.draw(window, state, dt);  // frozen scene
             renderer.menu_update_draw(window, pause_shell, settings, /*overlay*/ true);
             audio_engine.update(state);
             switch (pause_shell.navigation) {
@@ -433,18 +433,6 @@ MissionResult game_loop(Window& window,
             continue;
         }
         // Normal game loop execution
-        if (window.pressed(Key::esc)) {  // pause menu
-            state.paused = true;
-            pause_shell.screen = ShellState::Screen::Pause;
-            pause_shell.navigation = ShellState::Navigation::None;
-            continue;
-        }
-        if (window.pressed(Key::hash)) {  // instant restart shortcut
-            init_state();
-            game_manager.update(state);
-            physics_time = 0.0f;
-            continue;
-        }
         if (mission.time_limit > 0 && state.tick * Physics::dt >= mission.time_limit) break;
         if (!mission.player_ai) copy_control(window, settings, player_drone(state).control_m);
         physics_time = std::min(0.25f, physics_time + dt);
@@ -454,8 +442,18 @@ MissionResult game_loop(Window& window,
             physics_time -= Physics::dt;
         }
         game_manager.update(state);
-        renderer.draw(state, dt);
+        renderer.draw(window, state, dt);
         audio_engine.update(state);
+        if (window.pressed(Key::esc) || state.paused) {  // pause menu
+            state.paused = true;
+            pause_shell.screen = ShellState::Screen::Pause;
+            pause_shell.navigation = ShellState::Navigation::None;
+        }
+        if (window.pressed(Key::hash)) {  // instant restart shortcut
+            init_state();
+            game_manager.update(state);
+            physics_time = 0.0f;
+        }
     }
     window.set_audio_callback({});  // the window's callback can still call into the audio_engine
     if (!abandoned) {

@@ -960,6 +960,8 @@ struct TerrainView {
 };
 
 struct DroneView {
+    static constexpr float motor_height_ratio = 0.55f;
+
     Mesh frame_mesh;
     Mesh prop_mesh;
     Mesh cube_mesh;
@@ -981,6 +983,8 @@ struct DroneView {
         std::array<float, 4> angles{};
     };
     std::vector<DroneProp> props;
+    std::array<Vec<3>, 4> ref_motor_offsets_m{};
+    float ref_width = 0.0f;
 
     DroneView(const PhongShader& phong) {
         player_mat.init(phong.model_prog);
@@ -1023,6 +1027,38 @@ struct DroneView {
         prop_mesh.set_vertices(prop_v);
 
         cube_mesh.set_vertices(cube);
+
+        ref_motor_offsets_m = ref.motor_offsets_m;
+        for (auto& o : ref_motor_offsets_m)
+            o[2] = ref.height * motor_height_ratio;
+        ref_width = 2.0f * (rr + tip);  // motor span (2*rr) plus both blade tips
+    }
+
+    void draw_flat(const FlatShader& flat,
+                   const Mat4& view,
+                   const Mat4& model,
+                   const Vec<3>& color) const {
+        flat.prog.use();
+        flat.u_use_instancing.set(0);
+        flat.u_radius.set(0.0f);
+        flat.u_inner.set(0.0f);
+        flat.u_scale.set(1.0f);
+        flat.u_translate.set(Vec<2>{0.0f, 0.0f});
+        flat.u_alpha.set(1.0f);
+        flat.u_color.set(color);
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        flat.u_mvp.set(mul(view, model));
+        frame_mesh.draw();
+        const Quat id{0.0f, 0.0f, 0.0f, 1.0f};
+        for (const auto& off : ref_motor_offsets_m) {
+            Mat4 prop_model = mul(model, mat_rigid(mat_from(id), off));
+            flat.u_mvp.set(mul(view, prop_model));
+            prop_mesh.draw();
+        }
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
     }
 
     void draw(const GameState& s,
@@ -1057,7 +1093,7 @@ struct DroneView {
                 // Propellers
                 for (int m = 0; m < 4; ++m) {
                     Vec<3> offset = d.type.motor_offsets_m[m];
-                    offset[2] = d.type.height * 0.55f;
+                    offset[2] = d.type.height * motor_height_ratio;
                     float dir = (m == 0 || m == 3) ? 1.0f : -1.0f;
                     p.angles[m] += dir * 80.0f * (0.3f + d.motor_speed[m]) * dt;
                     Quat q_rot = quat_from_axis_angle({0, 0, 1}, p.angles[m]);
@@ -1474,6 +1510,27 @@ void main(){
     }
 };
 
+// In-game pause button (top-left).
+struct PauseButtonView {
+    void draw(GameState& s, Window& window, TextBatch& text, FlatShader&) {
+        const float scale = 2.0f;
+
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        auto w = float(vp[2]);
+        auto h = float(vp[3]);
+        auto pad = std::min(w, h) * hud_pad_ratio;
+        auto fs = text.base_font_size();
+        auto x = pad;
+        auto y = h - pad - fs[1] * scale;
+        auto mouse = window.mouse_pos();
+        if (!s.paused && window.mouse_pressed(1) && mouse[0] >= x &&
+            mouse[0] <= x + fs[0] * scale && mouse[1] >= y && mouse[1] <= y + fs[1] * scale)
+            s.paused = true;
+        text.draw("#", x, y, scale, {0.9f, 0.9f, 0.9f});
+    }
+};
+
 struct NoiseOverlayView {
     GlProgram program;
     Uniform u_time, u_pixel_size;
@@ -1773,7 +1830,8 @@ struct Menus {
                 view.items.push_back(plain_item("Resume"));
                 view.items.push_back(plain_item("Restart"));
                 view.items.push_back(plain_item("Settings"));
-                view.items.push_back(plain_item("Abandon"));
+                view.items.push_back(spacer_item());
+                view.items.push_back(plain_item("Exit to Menu"));
                 break;
             case ShellState::Screen::Settings:
                 view.title = "SETTINGS";
@@ -1969,7 +2027,7 @@ struct Menus {
                     shell.navigation = ShellState::Navigation::Restart;
                 } else if (cursor == 2) {
                     enter_submenu(shell, ShellState::Screen::Settings);
-                } else if (cursor == 3) {
+                } else if (cursor == 4) {
                     shell.navigation = ShellState::Navigation::Abandon;
                 }
                 break;
@@ -2115,7 +2173,81 @@ struct Menus {
             build(shell, settings, text, vp2);
     }
 
-    void draw(TextBatch& text, FlatShader& flat, bool overlay) {
+    // Pause screen reminder: the actual drone model, drawn flat-white, from above
+    // (pitch/roll keys around it) and from behind (lift/yaw keys around it).
+    void draw_controls_reminder(TextBatch& text,
+                                FlatShader& flat,
+                                const Settings& settings,
+                                const DroneView& drone) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+        const float vp_w = float(vp[2]);
+        const float vp_h = float(vp[3]);
+        const float u = view.line_h;
+
+        const float span = 6.16f * u;  // drone tip-to-tip screen width
+        const float gap = 0.6f * u;    // text gap beyond the props
+        const float scale = 1.1f;
+        const Vec<3> drone_col{0.45f, 0.55f, 0.8f};
+        const Vec<3> letter_col{1.0f, 1.0f, 1.0f};
+
+        const float cw = view.font_size[0] * scale;
+        const float ch = view.font_size[1] * scale;
+        const float s = span / drone.ref_width;  // model scale so the whole drone spans `span`
+        const Mat4 view_mat = mat_ortho(0.0f, vp_w, 0.0f, vp_h);
+        const float ex = span * 0.5f + gap;  // letter distance from centre
+
+        auto letter = [&](const char* l, float cx, float cy) {
+            const float w = float(std::strlen(l)) * cw;
+            text.draw(l, cx - w / 2.0f, cy - ch / 2.0f, scale, letter_col);
+        };
+        auto key = [&](Action::Type a) { return scancode_name(settings.bindings[size_t(a)]); };
+        auto render = [&](Vec<2> c, Quat rot, Vec<3> sc) {
+            drone.draw_flat(flat, view_mat,
+                            mul(mat_rigid(mat_from(rot), {c[0], c[1], 0.0f}),
+                                mat_diag(sc[0], sc[1], sc[2], 1.0f)),
+                            drone_col);
+        };
+
+        // Fit the pair into the band between the footer and the last menu row
+        // ("Exit to Menu"), centred horizontally.
+        const float band_bottom = 0.5f * view.margin + view.font_size[1];
+        const float band_top =
+            view.items.empty() ? vp_h - view.margin : view.items.back().row_bottom;
+        const float cy = 0.5f * (band_top + band_bottom);
+        const float half = ex + cw;
+        const float sep =
+            2.0f * half + 5.0f * u;  // centre spacing, so the side letters don't collide
+        const float cx = vp_w / 2.0f;
+        const Vec<2> c1{cx - 0.5f * sep, cy};
+        const Vec<2> c2{cx + 0.5f * sep, cy};
+
+        // Top-down view (drone unrotated): pitch/roll keys around it.
+        // z is the depth axis and is squashed so the flat ortho keeps it clipped out.
+        render(c1, Quat{0.0f, 0.0f, 0.0f, 1.0f}, {s, s, 2.0f});
+        letter(key(Action::PitchFwd), c1[0], c1[1] + ex + ch / 2.0f);
+        letter(key(Action::PitchBack), c1[0], c1[1] - ex - ch / 2.0f);
+        letter(key(Action::RollLeft),
+               c1[0] - ex - float(std::strlen(key(Action::RollLeft))) * cw / 2.0f, c1[1]);
+        letter(key(Action::RollRight),
+               c1[0] + ex + float(std::strlen(key(Action::RollRight))) * cw / 2.0f, c1[1]);
+
+        // Rear view (drone rolled 90deg about x): y becomes the depth axis and is
+        // squashed instead, so the two visible props line up horizontally.
+        render(c2, quat_from_axis_angle({1.0f, 0.0f, 0.0f}, -pi / 2.0f), {s, 2.0f, s});
+        letter(key(Action::LiftUp), c2[0], c2[1] + ex + ch / 2.0f);
+        letter(key(Action::LiftDown), c2[0], c2[1] - ex - ch / 2.0f);
+        letter(key(Action::YawLeft),
+               c2[0] - ex - float(std::strlen(key(Action::YawLeft))) * cw / 2.0f, c2[1]);
+        letter(key(Action::YawRight),
+               c2[0] + ex + float(std::strlen(key(Action::YawRight))) * cw / 2.0f, c2[1]);
+    }
+
+    void draw(TextBatch& text,
+              FlatShader& flat,
+              bool overlay,
+              const Settings& settings,
+              const DroneView& drone) {
         GLint vp[4];
         glGetIntegerv(GL_VIEWPORT, vp);
         const float vp_w = float(vp[2]);
@@ -2145,6 +2277,8 @@ struct Menus {
 
         if (overlay) {
             draw_rect(0.0f, 0.0f, vp_w, vp_h, Vec<3>{0.02f, 0.02f, 0.04f}, 0.65f);
+            if (prev_screen == ShellState::Screen::Pause)
+                draw_controls_reminder(text, flat, settings, drone);
         } else {
             glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -2240,6 +2374,7 @@ struct Renderer::State {
     ObjectiveView objective;
     MinimapView minimap;
     HudView hud;
+    PauseButtonView pause_button;
     NoiseOverlayView overlay;
     FpsView fps;
     TextBatch text;
@@ -2263,7 +2398,7 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
 
 Renderer::~Renderer() = default;
 
-void Renderer::draw(const GameState& s, float dt) {
+void Renderer::draw(Window& window, GameState& s, float dt) {
     glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
@@ -2280,6 +2415,7 @@ void Renderer::draw(const GameState& s, float dt) {
     // Overlays
     state->minimap.draw(s, state->flat);
     state->hud.draw(s, state->text);
+    state->pause_button.draw(s, window, state->text, state->flat);
     if (player.status != Drone::Status::Alive) state->overlay.draw(s, state->text);
     state->fps.draw(dt, state->text);
 }
@@ -2289,5 +2425,5 @@ void Renderer::menu_update_draw(Window& window,
                                 Settings& settings,
                                 bool overlay) {
     state->menus.update(window, shell, settings, state->text);
-    state->menus.draw(state->text, state->flat, overlay);
+    state->menus.draw(state->text, state->flat, overlay, settings, state->drone);
 }
