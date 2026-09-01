@@ -123,8 +123,8 @@ int main(int argc, char** argv) {
     Window window({
         .title = "Small Game",
         .mode = settings.fullscreen ? WindowMode::Fullscreen : WindowMode::Windowed,
-        .width = 1920,
-        .height = 1080,
+        .width = settings.window_width,
+        .height = settings.window_height,
         .msaa = settings.msaa,
         .vsync = settings.vsync,
         .profile_path = profile_path,

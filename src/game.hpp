@@ -224,6 +224,8 @@ struct Settings {
     bool fullscreen;
     uint msaa;
     bool vsync;
+    int window_width;
+    int window_height;
     float master_volume;
     float music_volume;
     float effects_volume;
@@ -231,6 +233,7 @@ struct Settings {
 
     static Settings defaults();
     static std::vector<std::tuple<std::string, Bindings>> control_presets();
+    static std::array<std::tuple<int, int>, 4> resolutions();
     LoadResult load(const std::string& dir);
     void save(const std::string& dir) const;
 };

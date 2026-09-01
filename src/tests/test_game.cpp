@@ -75,6 +75,8 @@ TEST_CASE("settings round-trip") {
     s.fullscreen = true;
     s.msaa = 4;
     s.vsync = false;
+    s.window_width = 1600;
+    s.window_height = 900;
     s.master_volume = 0.33f;
     s.music_volume = 0.75f;
     s.effects_volume = 0.55f;
@@ -86,6 +88,8 @@ TEST_CASE("settings round-trip") {
     CHECK(t.fullscreen == s.fullscreen);
     CHECK(t.msaa == s.msaa);
     CHECK(t.vsync == s.vsync);
+    CHECK(t.window_width == s.window_width);
+    CHECK(t.window_height == s.window_height);
     CHECK(t.master_volume == doctest::Approx(s.master_volume));
     CHECK(t.music_volume == doctest::Approx(s.music_volume));
     CHECK(t.effects_volume == doctest::Approx(s.effects_volume));

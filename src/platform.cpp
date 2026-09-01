@@ -28,6 +28,7 @@ struct Window::State {
     std::array<Uint8, 4> prev_mouse{};
     Vec<2> mouse_pos{};
     Vec<2> prev_mouse_pos{};
+    std::tuple<int, int> windowed_size{};  // (width, height) pixels when windowed; display-clamped
     struct TestPress {
         SDL_Scancode sc;
         float delay;
@@ -135,6 +136,10 @@ Window::Window(const WindowSettings& settings) : state(std::make_unique<State>()
         }
         flags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
     }
+    state->windowed_size = {
+        std::max(1, std::min(settings.width, width)),
+        std::max(1, std::min(settings.height, height)),
+    };
     state->window = SDL_CreateWindow(settings.title.c_str(), SDL_WINDOWPOS_CENTERED,
                                      SDL_WINDOWPOS_CENTERED, width, height, flags);
     if (!state->window) {
@@ -342,16 +347,31 @@ void Window::set_mode(WindowMode mode) {
         }
         return;
     }
-    // Windowed: the window currently spans the whole display, so shrink it to
-    // 2/3 of the display resolution (otherwise it would linger at fullscreen size).
-    SDL_DisplayMode dm;
-    if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
-        SDL_SetWindowSize(state->window, (dm.w * 2) / 3, (dm.h * 2) / 3);
-    }
+    // Windowed: restore the configured windowed size so leaving fullscreen doesn't
+    // linger at the display resolution.
+    SDL_SetWindowSize(state->window, std::get<0>(state->windowed_size),
+                      std::get<1>(state->windowed_size));
     if (SDL_SetWindowFullscreen(state->window, 0) != 0) {
         std::fprintf(stderr, "window: failed to leave fullscreen: %s\n", SDL_GetError());
     }
     SDL_SetWindowPosition(state->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+}
+
+void Window::set_resolution(int width, int height) {
+    SDL_DisplayMode dm;
+    if (SDL_GetCurrentDisplayMode(0, &dm) == 0) {
+        width = std::max(1, std::min(width, dm.w));
+        height = std::max(1, std::min(height, dm.h));
+    }
+    state->windowed_size = {width, height};
+    SDL_SetWindowSize(state->window, width, height);
+    SDL_SetWindowPosition(state->window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
+}
+
+std::tuple<int, int> Window::display_size() const {
+    SDL_DisplayMode dm;
+    if (SDL_GetCurrentDisplayMode(0, &dm) == 0) return {dm.w, dm.h};
+    return {0, 0};
 }
 
 const char* scancode_name(int sc) {

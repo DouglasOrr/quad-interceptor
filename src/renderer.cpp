@@ -1613,9 +1613,9 @@ struct MenuView {
         bool on = false;                                   // Toggle
         float fraction = 0.0f;                             // Slider, 0..1
         int index = 0;                                     // Choice selected option index
-        std::vector<std::pair<const char*, int>> options;  // Choice: (label, value)
+        std::vector<std::pair<std::string, int>> options;  // Choice: (label, value)
         int data = 0;                                      // KeyBinding: Action::Type of this row
-        int preset = -1;                                   // Controls preset: control_presets() index
+        int preset = -1;  // Controls preset: control_presets() index
         float row_bottom = 0.0f;
     };
     const char* title = nullptr;
@@ -1644,7 +1644,7 @@ MenuView::Item plain_item(const char* label, bool enabled = true) {
 }
 
 MenuView::Item choice_item(const char* label,
-                           std::vector<std::pair<const char*, int>> options,
+                           std::vector<std::pair<std::string, int>> options,
                            int index) {
     MenuView::Item it;
     it.type = MenuView::Item::Choice;
@@ -1791,9 +1791,23 @@ struct Menus {
                 const std::array<int, 4> modes{1, 2, 4, 8};
                 for (int n = 0; n < int(modes.size()); ++n)
                     if (int(settings.msaa) == modes[n]) msaa_index = n;
+                int res_index = 0;
+                const auto res = Settings::resolutions();
+                for (int r = 0; r < int(res.size()); ++r) {
+                    if (std::get<0>(res[size_t(r)]) == settings.window_width &&
+                        std::get<1>(res[size_t(r)]) == settings.window_height)
+                        res_index = r;
+                }
+                std::vector<std::pair<std::string, int>> res_options;
+                for (int r = 0; r < int(res.size()); ++r)
+                    res_options.push_back({std::to_string(std::get<0>(res[size_t(r)])) + "x" +
+                                               std::to_string(std::get<1>(res[size_t(r)])),
+                                           r});
                 view.items.push_back(choice_item("Window mode",
                                                  {{"Windowed", 0}, {"Fullscreen", 1}},
                                                  settings.fullscreen ? 1 : 0));
+                view.items.push_back(
+                    choice_item("Resolution (Windowed)", std::move(res_options), res_index));
                 view.items.push_back(
                     choice_item("MSAA", {{"1x", 1}, {"2x", 2}, {"4x", 4}, {"8x", 8}}, msaa_index));
                 view.items.push_back(toggle_item("VSync", settings.vsync));
@@ -1850,8 +1864,23 @@ struct Menus {
                     window.set_mode(settings.fullscreen ? WindowMode::Fullscreen
                                                         : WindowMode::Windowed);
                 } else if (cursor == 1) {
-                    settings.msaa = uint(item.options[size_t(item.index)].second);
+                    const auto res = Settings::resolutions();
+                    const auto r = size_t(std::clamp(item.index, 0, int(res.size()) - 1));
+                    const auto [rw, rh] = res[r];
+                    settings.window_width = rw;
+                    settings.window_height = rh;
+                    if (settings.fullscreen) {
+                        // A non-native resolution only makes sense windowed
+                        const auto native = window.display_size();
+                        if (std::get<0>(native) != rw || std::get<1>(native) != rh) {
+                            settings.fullscreen = false;
+                            window.set_mode(WindowMode::Windowed);
+                        }
+                    }
+                    if (!settings.fullscreen) window.set_resolution(rw, rh);
                 } else if (cursor == 2) {
+                    settings.msaa = uint(item.options[size_t(item.index)].second);
+                } else if (cursor == 3) {
                     settings.vsync = item.on;
                     window.set_vsync(item.on);
                 }

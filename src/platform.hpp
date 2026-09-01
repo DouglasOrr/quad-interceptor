@@ -119,6 +119,8 @@ struct Window {
 
     void set_vsync(bool vsync);
     void set_mode(WindowMode mode);
+    void set_resolution(int width, int height);
+    std::tuple<int, int> display_size() const;
 
     void set_audio_callback(std::function<void(int16_t* stream, int num_frames)> callback);
 

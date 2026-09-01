@@ -148,6 +148,8 @@ Settings Settings::defaults() {
     s.fullscreen = false;
     s.msaa = 1;
     s.vsync = true;
+    s.window_width = 1920;
+    s.window_height = 1080;
     s.master_volume = 1.0f;
     s.music_volume = 0.5f;
     s.effects_volume = 0.5f;
@@ -193,6 +195,15 @@ std::vector<std::tuple<std::string, Settings::Bindings>> Settings::control_prese
     };
 }
 
+std::array<std::tuple<int, int>, 4> Settings::resolutions() {
+    return {{
+        {1280, 720},
+        {1600, 900},
+        {1920, 1080},
+        {2560, 1440},
+    }};
+}
+
 Settings::LoadResult Settings::load(const std::string& dir) {
     auto path = dir + "/" + settings_file;
     std::ifstream in(path);
@@ -216,6 +227,14 @@ Settings::LoadResult Settings::load(const std::string& dir) {
             if (!failed && n >= 1) msaa = uint(n);
         } else if (key == "vsync") {
             parse_bool(value, vsync, failed, settings_file);
+        } else if (key == "window_width") {
+            int n = 0;
+            parse_int(value, n, failed, settings_file);
+            if (!failed && n > 0) window_width = n;
+        } else if (key == "window_height") {
+            int n = 0;
+            parse_int(value, n, failed, settings_file);
+            if (!failed && n > 0) window_height = n;
         } else if (key == "master_volume") {
             float f = 0.0f;
             parse_float(value, f, failed, settings_file);
@@ -247,6 +266,8 @@ void Settings::save(const std::string& dir) const {
     out << "fullscreen=" << (fullscreen ? "true" : "false") << '\n';
     out << "msaa=" << msaa << '\n';
     out << "vsync=" << (vsync ? "true" : "false") << '\n';
+    out << "window_width=" << window_width << '\n';
+    out << "window_height=" << window_height << '\n';
     out << "master_volume=" << fmt_float(master_volume) << '\n';
     out << "music_volume=" << fmt_float(music_volume) << '\n';
     out << "effects_volume=" << fmt_float(effects_volume) << '\n';
