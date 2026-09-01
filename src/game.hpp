@@ -185,6 +185,7 @@ struct Mission {
 
 struct GameState {
     uint64 tick;
+    bool paused;
     std::vector<Drone> drones;
     Vec<3> camera_pos;
     Quat camera_orientation;

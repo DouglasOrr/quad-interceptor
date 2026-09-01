@@ -402,27 +402,25 @@ MissionResult game_loop(Window& window,
     Stopwatch stopwatch;
     float physics_time = 0.0f;
     ShellState pause_shell{};
-    bool paused = false;
     bool abandoned = false;
     MissionResult result{MissionResult::None, 0.0f, 0u};
     while (window.frame() && !abandoned) {
         const float dt = stopwatch.lap();
-        if (paused) {
+        if (state.paused) {
             renderer.draw(state, dt);  // frozen scene
             renderer.menu_update_draw(window, pause_shell, settings, /*overlay*/ true);
-            audio_engine.update(state);  // keep volumes live from the pause menu
+            audio_engine.update(state);
             switch (pause_shell.navigation) {
                 case ShellState::Navigation::None:
                     break;
                 case ShellState::Navigation::Resume:
-                    paused = false;
+                    state.paused = false;
                     pause_shell.navigation = ShellState::Navigation::None;
                     break;
                 case ShellState::Navigation::Restart:
                     init_state();
                     game_manager.update(state);
                     physics_time = 0.0f;
-                    paused = false;
                     pause_shell.navigation = ShellState::Navigation::None;
                     break;
                 case ShellState::Navigation::Abandon:
@@ -436,7 +434,7 @@ MissionResult game_loop(Window& window,
         }
         // Normal game loop execution
         if (window.pressed(Key::esc)) {  // pause menu
-            paused = true;
+            state.paused = true;
             pause_shell.screen = ShellState::Screen::Pause;
             pause_shell.navigation = ShellState::Navigation::None;
             continue;
