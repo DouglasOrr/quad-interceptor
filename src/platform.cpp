@@ -27,6 +27,7 @@ struct Window::State {
     std::array<Uint8, 4> mouse{};  // index = SDL button (1..3)
     std::array<Uint8, 4> prev_mouse{};
     Vec<2> mouse_pos{};
+    Vec<2> prev_mouse_pos{};
     struct TestPress {
         SDL_Scancode sc;
         float delay;
@@ -205,6 +206,7 @@ bool Window::frame() {
     // Snapshot previous inputs, then fold in this frame's events.
     state->prev_keys = state->keys;
     state->prev_mouse = state->mouse;
+    state->prev_mouse_pos = state->mouse_pos;
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -309,6 +311,12 @@ std::optional<int> Window::scancode_pressed_any() const {
 
 Vec<2> Window::mouse_pos() const {
     return state->mouse_pos;
+}
+
+bool Window::mouse_moved() const {
+    auto pos = state->mouse_pos;
+    auto prev = state->prev_mouse_pos;
+    return pos[0] != prev[0] || pos[1] != prev[1];
 }
 
 bool Window::mouse_held(uint button) const {

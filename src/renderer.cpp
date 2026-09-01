@@ -2026,9 +2026,9 @@ struct Menus {
             return;
         }
 
-        // Mouse hover moves the shared cursor
+        // Mouse updates the cursor on move
         const int hover = view.row_hit(vp2, window.mouse_pos());
-        if (hover >= 0 && view.items[size_t(hover)].enabled) cursor = hover;
+        if (window.mouse_moved() && hover >= 0 && view.items[size_t(hover)].enabled) cursor = hover;
 
         // Keyboard navigation skips disabled rows
         auto move_cursor = [&](int dir) {

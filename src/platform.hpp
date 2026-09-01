@@ -113,6 +113,7 @@ struct Window {
 
     // Mouse position in drawable pixels, y-up (to match GL), + button state
     Vec<2> mouse_pos() const;
+    bool mouse_moved() const;
     bool mouse_held(uint button) const;
     bool mouse_pressed(uint button) const;
 
