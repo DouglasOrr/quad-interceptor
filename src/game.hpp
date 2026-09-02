@@ -177,10 +177,13 @@ struct Mission {
     std::vector<Circle> objectives;
     uint max_enemies;
     float enemy_spawn_radius;  // around objective (defense) or player (sandbox, chase)
+    Vec<2> enemy_spawn_alt;
     float enemy_spawn_interval;
     float enemy_tilt;
     uint starting_lives;
-    float target_time;  // (race)
+    float target_time;       // race (time to beat), chase (starting countdown)
+    float kill_bonus_time;   // chase
+    uint target_kill_count;  // chase, tutorial
     // Test params
     float test_time_limit = 0;
     bool test_player_ai = false;

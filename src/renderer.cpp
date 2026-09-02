@@ -1520,10 +1520,12 @@ void main(){
             text.draw(buf, timer_x, timer_y, timer_scale, timer_col);
         } else if (s.mission.type == Mission::Chase) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
-            std::snprintf(buf, sizeof(buf), "%.1fs  CAUGHT %u", sec, s.kill_count);
+            std::snprintf(buf, sizeof(buf), "%.1f s (destroyed %u/%u)", sec, s.kill_count,
+                          s.mission.target_kill_count);
+            Vec<3> timer_col = (sec < 10.0f) ? Vec<3>{1.0f, 0.9f, 0.2f} : Vec<3>{1.0f, 1.0f, 1.0f};
             const float timer_w = float(std::strlen(buf)) * font_size[0] * timer_scale;
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
-            text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
+            text.draw(buf, timer_x, timer_y, timer_scale, timer_col);
         }
 
         // Tutorial: long help text wrapped across the bottom of the screen, kept

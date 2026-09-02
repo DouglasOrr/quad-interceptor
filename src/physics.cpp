@@ -446,7 +446,7 @@ float choose_safe_altitude(const Terrain& terr, const Vec<3>& pos, Vec<2> target
     constexpr float margin = 5.0f;
     constexpr float min_alt = 10.0f;
     const float max_alt =
-        terr.type.kind == TerrainType::Kind::City ? terr.type.city.lock_on_level - margin : 1000.0f;
+        terr.type.kind == TerrainType::Kind::City ? terr.type.city.lock_on_level - margin : 60.0f;
 
     float alt = std::clamp(pos[2], min_alt, max_alt);
 
@@ -540,10 +540,9 @@ Vec<3> choose_city_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
 
 Vec<3> choose_plains_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
     // Pick a direction and fly that leg, re-picking on arrival.
-    constexpr float arrival = 2.0f * Terrain::cell_size;
-    constexpr Vec<2> leg_range = {6.0f, 12.0f};  // leg length, in cells
+    constexpr Vec<2> leg_range = {40.0f, 60.0f};  // leg length, in cells
     Vec<2> p2 = {pos[0], pos[1]};
-    if (!a.goal || length(*a.goal - p2) <= arrival) {
+    if (!a.goal || length(*a.goal - p2) <= Terrain::cell_size) {
         uint64 h = hash(s.terrain.seed, s.tick, a.id);
         float angle = 0.0f;
         if (s.mission.type == Mission::Defense && !s.mission.objectives.empty()) {
