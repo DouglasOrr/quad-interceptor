@@ -36,7 +36,8 @@ Font Font::load() {
 
 namespace {
 constexpr float respawn_delay = 2.0f;
-constexpr float player_spawn_alt = 5.0f;
+constexpr float finish_delay = 2.0f;
+constexpr float player_spawn_alt = 20.0f;
 constexpr float enemy_spawn_alt = 20.0f;
 constexpr float sandbox_kill_radius = 60.0f * Terrain::cell_size;  // 6 city blocks
 constexpr float chase_escape_radius = 25.0f * Terrain::cell_size;  // 2.5 city blocks
@@ -96,162 +97,271 @@ Drone& spawn_drone(uint& next_drone_id,
 }  // namespace
 
 std::vector<DroneType> DroneType::all() {
-    DroneType acro;
-    acro.name = "acro";
-    acro.mass = 1.0f;
-    acro.inv_inertia_m = mat_diag(0.4f, 0.4f, 1.5f);
-    acro.damping_m = mat_diag(0.2f, 0.2f, 1.0f);
-    acro.ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f);
-    acro.motor_force = 8.0f;
-    acro.motor_torque = 0.6f;
-    acro.motor_offsets_m = DroneType::motor_offsets_from_radius(0.5f);
-    acro.height = 0.15f;
-    acro.collision_radius = 0.4f;
-    acro.mix_roll_to_yaw = 0.0f;
-    Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
-    acro.pid_roll_rate = rate;
-    acro.pid_pitch_rate = rate;
-    acro.pid_yaw_rate = rate;
+    std::vector<DroneType> drones;
 
-    DroneType tilt = acro;
-    tilt.name = "tilt";
-    tilt.damping_m = mat_diag(0.2f, 2.0f, 1.0f);  // high lateral drag, so it doesn't slide sideways
-    tilt.mix_roll_to_yaw = 0.6f;
-    Pid angle = {
-        .target = 40.0f * deg_to_rad, .lo = -1.0f, .hi = 1.0f, .kp = 3.0f, .ki = 0.0f, .kd = 0.2f};
-    tilt.pid_roll_angle = angle;
-    tilt.pid_pitch_angle = angle;
-    tilt.pid_lift_rate = {
-        .target = 20.0f, .lo = -1.0f, .hi = 1.0f, .kp = 10.0f, .ki = 2.0f, .kd = 0.0f};
+    {
+        DroneType tilt;
+        tilt.name = "tilt";
+        tilt.mass = 1.0f;
+        tilt.inv_inertia_m = mat_diag(0.4f, 0.4f, 1.5f);
+        tilt.damping_m =
+            mat_diag(0.2f, 2.0f, 1.0f);  // high lateral drag, so it doesn't slide sideways
+        tilt.ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f);
+        tilt.motor_force = 8.0f;
+        tilt.motor_torque = 0.6f;
+        tilt.motor_offsets_m = DroneType::motor_offsets_from_radius(0.5f);
+        tilt.height = 0.15f;
+        tilt.collision_radius = 0.4f;
+        tilt.mix_roll_to_yaw = 0.4f;
+        Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 2.0f, .kd = 2.0f};
+        tilt.pid_roll_rate = rate;
+        tilt.pid_pitch_rate = rate;
+        tilt.pid_yaw_rate = {
+            .target = 1.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 0.0f, .kd = 0.0f};
+        Pid angle = {.target = 35.0f * deg_to_rad,
+                     .lo = -1.0f,
+                     .hi = 1.0f,
+                     .kp = 10.0f,
+                     .ki = 0.0f,
+                     .kd = 0.2f};
+        tilt.pid_roll_angle = angle;
+        tilt.pid_pitch_angle = angle;
+        tilt.pid_lift_rate = {
+            .target = 20.0f, .lo = -1.0f, .hi = 1.0f, .kp = 20.0f, .ki = 2.0f, .kd = 0.0f};
+        drones.push_back(tilt);
+    }
+    {
+        DroneType acro;
+        acro.name = "acro";
+        acro.mass = 1.0f;
+        acro.inv_inertia_m = mat_diag(0.4f, 0.4f, 1.5f);
+        acro.damping_m = mat_diag(0.2f, 0.2f, 1.0f);
+        acro.ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f);
+        acro.motor_force = 8.0f;
+        acro.motor_torque = 0.6f;
+        acro.motor_offsets_m = DroneType::motor_offsets_from_radius(0.5f);
+        acro.height = 0.15f;
+        acro.collision_radius = 0.4f;
+        acro.mix_roll_to_yaw = 0.0f;
+        Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+        acro.pid_roll_rate = rate;
+        acro.pid_pitch_rate = rate;
+        acro.pid_yaw_rate = rate;
+        drones.push_back(acro);
+    }
 
-    return {acro, tilt};
+    return drones;
 }
 
 DroneType DroneType::enemy() {
-    DroneType type = all().front();  // identical to the player's acro drone (for now)
-    type.name = "enemy";
-    return type;
+    Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    return {
+        .name = "enemy",
+        .mass = 1.0f,
+        .inv_inertia_m = mat_diag(0.4f, 0.4f, 1.5f),
+        .damping_m = mat_diag(0.2f, 0.2f, 1.0f),
+        .ang_damping_m = mat_diag(0.4f, 0.4f, 0.4f),
+        .motor_force = 8.0f,
+        .motor_torque = 0.6f,
+        .motor_offsets_m = DroneType::motor_offsets_from_radius(0.5f),
+        .height = 0.15f,
+        .collision_radius = 0.4f,
+        .mix_roll_to_yaw = 0.0f,
+        .pid_roll_rate = rate,
+        .pid_pitch_rate = rate,
+        .pid_lift_rate = {},
+        .pid_yaw_rate = rate,
+        .pid_roll_angle = {},
+        .pid_pitch_angle = {},
+    };
 }
 
 std::vector<Mission> Mission::all() {
+    auto drones = DroneType::all();
+    auto drone_tilt =
+        std::find_if(drones.begin(), drones.end(), [](auto& d) { return d.name == "tilt"; });
+    // auto drone_acro =
+    //     std::find_if(drones.begin(), drones.end(), [](auto& d) { return d.name == "acro"; });
+    TerrainType terrain_plains{.kind = TerrainType::Kind::Plains,
+                               .plains = {.pole_prob = 0.06f,
+                                          .pole_radius_range = {0.25f, 0.8f},
+                                          .pole_height_range = {4.0f, 14.0f},
+                                          .pylon_run_prob = 1.0f,
+                                          .pylon_row_period = 48,
+                                          .pylon_stride = 4}};
+
     std::vector<Mission> missions;
 
-    auto city = TerrainType{.kind = TerrainType::Kind::City,
-                            .city = {.lock_on_level = 80.0f,
-                                     .block_size = 10,
-                                     .street_size = 2,
-                                     .building_height_range = {10.0f, 100.0f},
-                                     .stilt_prob = 0.3f,
-                                     .stilt_podium_range = {1.0f, 40.0f},
-                                     .stilt_gap_range = {5.0f, 20.0f},
-                                     .skywalk_prob = 0.5f,
-                                     .skywalk_height_range = {10.0f, 80.0f}}};
+    missions.push_back({
+        .type = Mission::Tutorial,
+        .name = "Tutorial",
+        .info = "Learn to fly (tilt mode) -- see the pause menu (ESC or top-left) for controls.\n"
+                "Try to fly to the green objective marker. You'll spot a red dot on your minimap."
+                "That's an enemy drone. Fly close to it to detonate yourself (and it)."
+                "To finish the mission, fly through all green markers and destroy an enemy drone.",
+        .seed = 0xbf4f139e,
+        .terrain_type = terrain_plains,
+        .player_type = *drone_tilt,
+        .objectives =
+            {
+                {Vec<2>{0.0f, 0.0f}, Terrain::cell_size},
+                {Vec<2>{100.0f, 0.0f}, Terrain::cell_size},
+                {Vec<2>{-100.0f, 300.0f}, Terrain::cell_size},
+                {Vec<2>{-100.0f, -300.0f}, Terrain::cell_size},
+            },
+        .max_enemies = 1,
+        .enemy_spawn_radius = 4.0f * Terrain::cell_size,
+        .enemy_spawn_interval = 20.0f,
+        .enemy_tilt = 0.0f,
+        .starting_lives = 0,
+        .target_time = 0,
+    });
 
-    auto plains = TerrainType{.kind = TerrainType::Kind::Plains,
-                              .plains = {.pole_prob = 0.06f,
-                                         .pole_radius_range = {0.25f, 0.8f},
-                                         .pole_height_range = {4.0f, 14.0f},
-                                         .pylon_run_prob = 0.7f,
-                                         .pylon_row_period = 48,
-                                         .pylon_stride = 4}};
+    missions.push_back({
+        .type = Mission::Race,
+        .name = "Race Across the Plains",
+        .info = "Complete the course as fast as possible.",
+        .seed = 0xc6157a1c,
+        .terrain_type = terrain_plains,
+        .player_type = *drone_tilt,
+        .objectives =
+            {
+                {Vec<2>{0.0f, -50.0f}, Terrain::cell_size},
+                {Vec<2>{100.0f, -50.0f}, Terrain::cell_size},
+                {Vec<2>{150.0f, -150.0f}, Terrain::cell_size},
+                {Vec<2>{100.0f, -250.0f}, Terrain::cell_size},
+                {Vec<2>{0.0f, -100.0f}, Terrain::cell_size},
+                {Vec<2>{-25.0f, 10.0f}, Terrain::cell_size / 2},
+                {Vec<2>{-80.0f, -5.0f}, Terrain::cell_size / 2},
+                {Vec<2>{-120.0f, 10.0f}, Terrain::cell_size / 2},
+                {Vec<2>{-160.0f, -5.0f}, Terrain::cell_size / 2},
+                {Vec<2>{-200.0f, 5.0f}, Terrain::cell_size / 2},
+                {Vec<2>{-240.0f, -5.0f}, Terrain::cell_size / 2},
+                {Vec<2>{-0.0f, 40.0f}, Terrain::cell_size},
+            },
+        .max_enemies = 0,
+        .enemy_spawn_radius = 0,
+        .enemy_spawn_interval = 0,
+        .enemy_tilt = 0,
+        .starting_lives = 0,
+        .target_time = 60.0f,
+    });
 
-    // Race circuit shape (unit square, 2 blocks to a side), city: snapped to
-    // intersections; plains: raw world positions.
-    constexpr std::array<Vec<2>, 9> circuit = {{{0.0f, 0.0f},
-                                                {0.0f, 1.0f},
-                                                {1.0f, 1.0f},
-                                                {1.0f, 0.0f},
-                                                {1.0f, -1.0f},
-                                                {0.0f, -1.0f},
-                                                {-1.0f, -1.0f},
-                                                {-1.0f, 0.0f},
-                                                {0.0f, 0.0f}}};
-    DroneType default_player = DroneType::all().front();
-    const TerrainType terrains[] = {city, plains};
-    for (const auto& terrain : terrains) {
-        Mission proto{};
-        proto.terrain_type = terrain;
-        proto.player_type = default_player;
-        proto.player_ai = false;
-        proto.enemy_tilt = 1.0f;
+    // auto city = TerrainType{.kind = TerrainType::Kind::City,
+    //                         .city = {.lock_on_level = 80.0f,
+    //                                  .block_size = 10,
+    //                                  .street_size = 2,
+    //                                  .building_height_range = {10.0f, 100.0f},
+    //                                  .stilt_prob = 0.3f,
+    //                                  .stilt_podium_range = {1.0f, 40.0f},
+    //                                  .stilt_gap_range = {5.0f, 20.0f},
+    //                                  .skywalk_prob = 0.5f,
+    //                                  .skywalk_height_range = {10.0f, 80.0f}}};
 
-        Mission sandbox = proto;
-        sandbox.type = Mission::Sandbox;
-        sandbox.name = terrain.kind == TerrainType::Kind::Plains ? "plains/sandbox" : "sandbox";
-        sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
-        sandbox.enemy_spawn_interval = 10.0f;
-        sandbox.max_enemies = 3;
-        sandbox.seed = 0x5a17b0bULL;
-        missions.push_back(sandbox);
+    // auto plains = TerrainType{.kind = TerrainType::Kind::Plains,
+    //                           .plains = {.pole_prob = 0.06f,
+    //                                      .pole_radius_range = {0.25f, 0.8f},
+    //                                      .pole_height_range = {4.0f, 14.0f},
+    //                                      .pylon_run_prob = 0.7f,
+    //                                      .pylon_row_period = 48,
+    //                                      .pylon_stride = 4}};
 
-        Mission defense = proto;
-        defense.type = Mission::Defense;
-        defense.name = terrain.kind == TerrainType::Kind::Plains ? "plains/defense" : "defense";
-        defense.enemy_spawn_radius = 30.0f * Terrain::cell_size;
-        defense.enemy_spawn_interval = 10.0f;
-        defense.max_enemies = 3;
-        defense.starting_lives = 5;
-        defense.seed = 0xdef5eedULL;
-        defense.objectives = {Circle{terrain.kind == TerrainType::Kind::City
-                                         ? terrain.city.snap_intersection({0, 0})
-                                         : Vec<2>{0, 0},
-                                     Terrain::cell_size}};
-        missions.push_back(defense);
+    // // Race circuit shape (unit square, 2 blocks to a side), city: snapped to
+    // // intersections; plains: raw world positions.
+    // constexpr std::array<Vec<2>, 9> circuit = {{{0.0f, 0.0f},
+    //                                             {0.0f, 1.0f},
+    //                                             {1.0f, 1.0f},
+    //                                             {1.0f, 0.0f},
+    //                                             {1.0f, -1.0f},
+    //                                             {0.0f, -1.0f},
+    //                                             {-1.0f, -1.0f},
+    //                                             {-1.0f, 0.0f},
+    //                                             {0.0f, 0.0f}}};
+    // DroneType default_player = DroneType::all().front();
+    // const TerrainType terrains[] = {city, plains};
+    // for (const auto& terrain : terrains) {
+    //     Mission proto{};
+    //     proto.terrain_type = terrain;
+    //     proto.player_type = default_player;
+    //     proto.test_player_ai = false;
+    //     proto.enemy_tilt = 1.0f;
 
-        Mission race = proto;
-        race.type = Mission::Race;
-        race.name = terrain.kind == TerrainType::Kind::Plains ? "plains/race" : "race";
-        race.seed = 0xace5aceULL;
-        for (auto u : circuit) {
-            const float race_span =
-                terrain.kind == TerrainType::Kind::Plains
-                    ? 20.0f * Terrain::cell_size
-                    : 2.0f * float(terrain.city.block_size) * Terrain::cell_size;
-            const Vec<2> p = race_span * u;
-            race.objectives.push_back(
-                {terrain.kind == TerrainType::Kind::City ? terrain.city.snap_intersection(p) : p,
-                 Terrain::cell_size});
-        }
-        missions.push_back(race);
+    //     Mission sandbox = proto;
+    //     sandbox.type = Mission::Sandbox;
+    //     sandbox.name = terrain.kind == TerrainType::Kind::Plains ? "plains/sandbox" : "sandbox";
+    //     sandbox.enemy_spawn_radius = 20.0f * Terrain::cell_size;
+    //     sandbox.enemy_spawn_interval = 10.0f;
+    //     sandbox.max_enemies = 3;
+    //     sandbox.seed = 0x5a17b0bULL;
+    //     missions.push_back(sandbox);
 
-        Mission tutorial = proto;
-        tutorial.type = Mission::Tutorial;
-        tutorial.name = terrain.kind == TerrainType::Kind::Plains ? "plains/tutorial" : "tutorial";
-        tutorial.seed = 0x7a7a5e7ULL;
-        tutorial.starting_lives = 3;
-        tutorial.enemy_spawn_radius = 15.0f * Terrain::cell_size;
-        tutorial.enemy_spawn_interval = 20.0f;
-        tutorial.max_enemies = 1;
-        tutorial.enemy_tilt = 0.0f;
-        constexpr std::array<Vec<2>, 5> tutorial_path = {
-            {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {2.0f, 1.0f}, {2.0f, 2.0f}}};
-        for (auto u : tutorial_path) {
-            const float tutorial_span =
-                terrain.kind == TerrainType::Kind::Plains
-                    ? 20.0f * Terrain::cell_size
-                    : 2.0f * float(terrain.city.block_size) * Terrain::cell_size;
-            const Vec<2> p = tutorial_span * u;
-            tutorial.objectives.push_back(
-                {terrain.kind == TerrainType::Kind::City ? terrain.city.snap_intersection(p) : p,
-                 Terrain::cell_size});
-        }
-        tutorial.info =
-            "Learn to fly (acro mode) -- The controls are the same, but the drone now"
-            " keeps going in the direction you choose, until you change it."
-            " Have a play. Once you're happy, fly through the objective markers to complete"
-            " the mission.";
-        missions.push_back(tutorial);
+    //     Mission defense = proto;
+    //     defense.type = Mission::Defense;
+    //     defense.name = terrain.kind == TerrainType::Kind::Plains ? "plains/defense" : "defense";
+    //     defense.enemy_spawn_radius = 30.0f * Terrain::cell_size;
+    //     defense.enemy_spawn_interval = 10.0f;
+    //     defense.max_enemies = 3;
+    //     defense.starting_lives = 5;
+    //     defense.seed = 0xdef5eedULL;
+    //     defense.objectives = {Circle{terrain.kind == TerrainType::Kind::City
+    //                                      ? terrain.city.snap_intersection({0, 0})
+    //                                      : Vec<2>{0, 0},
+    //                                  Terrain::cell_size}};
+    //     missions.push_back(defense);
 
-        Mission chase = proto;
-        chase.type = Mission::Chase;
-        chase.name = terrain.kind == TerrainType::Kind::Plains ? "plains/chase" : "chase";
-        chase.enemy_spawn_radius = 10.0f * Terrain::cell_size;
-        chase.max_enemies = 1;
-        chase.starting_lives = 3;
-        chase.time_limit = 60.0f;
-        chase.seed = 0xca5e7fULL;
-        missions.push_back(chase);
-    }
+    //     Mission race = proto;
+    //     race.type = Mission::Race;
+    //     race.name = terrain.kind == TerrainType::Kind::Plains ? "plains/race" : "race";
+    //     race.seed = 0xace5aceULL;
+    //     for (auto u : circuit) {
+    //         const float race_span =
+    //             terrain.kind == TerrainType::Kind::Plains
+    //                 ? 20.0f * Terrain::cell_size
+    //                 : 2.0f * float(terrain.city.block_size) * Terrain::cell_size;
+    //         const Vec<2> p = race_span * u;
+    //         race.objectives.push_back(
+    //             {terrain.kind == TerrainType::Kind::City ? terrain.city.snap_intersection(p) : p,
+    //              Terrain::cell_size});
+    //     }
+    //     missions.push_back(race);
+
+    //     Mission tutorial = proto;
+    //     tutorial.type = Mission::Tutorial;
+    //     tutorial.name = terrain.kind == TerrainType::Kind::Plains ? "plains/tutorial" :
+    //     "tutorial"; tutorial.seed = 0x7a7a5e7ULL; tutorial.starting_lives = 3;
+    //     tutorial.enemy_spawn_radius = 15.0f * Terrain::cell_size;
+    //     tutorial.enemy_spawn_interval = 20.0f;
+    //     tutorial.max_enemies = 1;
+    //     tutorial.enemy_tilt = 0.0f;
+    //     constexpr std::array<Vec<2>, 5> tutorial_path = {
+    //         {{0.0f, 0.0f}, {1.0f, 0.0f}, {2.0f, 0.0f}, {2.0f, 1.0f}, {2.0f, 2.0f}}};
+    //     for (auto u : tutorial_path) {
+    //         const float tutorial_span =
+    //             terrain.kind == TerrainType::Kind::Plains
+    //                 ? 20.0f * Terrain::cell_size
+    //                 : 2.0f * float(terrain.city.block_size) * Terrain::cell_size;
+    //         const Vec<2> p = tutorial_span * u;
+    //         tutorial.objectives.push_back(
+    //             {terrain.kind == TerrainType::Kind::City ? terrain.city.snap_intersection(p) : p,
+    //              Terrain::cell_size});
+    //     }
+    //     tutorial.info =
+    //         "Learn to fly (acro mode) -- The controls are the same, but the drone now"
+    //         " keeps going in the direction you choose, until you change it."
+    //         " Have a play. Once you're happy, fly through the objective markers to complete"
+    //         " the mission.";
+    //     missions.push_back(tutorial);
+
+    //     Mission chase = proto;
+    //     chase.type = Mission::Chase;
+    //     chase.name = terrain.kind == TerrainType::Kind::Plains ? "plains/chase" : "chase";
+    //     chase.enemy_spawn_radius = 10.0f * Terrain::cell_size;
+    //     chase.max_enemies = 1;
+    //     chase.starting_lives = 3;
+    //     chase.test_time_limit = 60.0f;
+    //     chase.seed = 0xca5e7fULL;
+    //     missions.push_back(chase);
+    // }
 
     return missions;
 }
@@ -261,7 +371,6 @@ struct GameManager::State {
     uint64 player_respawn_tick = 0;
     uint64 next_enemy_spawn_tick = 0;
     uint64 race_start_tick = 0;
-    bool player_was_alive = true;
 };
 
 GameManager::GameManager() : state(std::make_unique<State>()) {}
@@ -275,11 +384,6 @@ void GameManager::update(GameState& s) {
         spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.mission.player_type,
                     player_spawn(s, std::nullopt));
     auto& player = player_drone(s);
-
-    if (s.mission.type != Mission::Race && s.mission.time_limit > 0) {
-        auto end_tick = uint64(s.mission.time_limit / Physics::dt);
-        s.timer = (s.tick < end_tick) ? (end_tick - s.tick) : 0;
-    }
 
     // Mission updates
     if (s.mission.type == Mission::Defense) {
@@ -314,13 +418,17 @@ void GameManager::update(GameState& s) {
                 ++s.next_objective;
             }
         }
-    }
-    if (s.mission.type == Mission::Chase) {
-        if (player.status == Drone::Status::Detonated && state->player_was_alive) {
-            ++s.kill_count;
+        if (finished && !s.finish_tick.has_value()) {
+            if (s.mission.type == Mission::Race ||
+                (s.mission.type == Mission::Tutorial && s.kill_count > 0)) {
+                s.finish_tick = s.tick + uint64(finish_delay / Physics::dt);
+                const float time = float(s.timer.value_or(0)) * Physics::dt;
+                s.result = {MissionResult::Completed, time, s.kill_count};
+                if (s.mission.type == Mission::Race && time > s.mission.target_time)
+                    s.result.type = MissionResult::Failed;
+            }
         }
     }
-    state->player_was_alive = (player.status == Drone::Status::Alive);
 
     // Player respawn
     if (player.status == Drone::Status::Alive) {
@@ -338,7 +446,10 @@ void GameManager::update(GameState& s) {
     // Enemy cleanup: dead drones, and (sandbox) drones strayed beyond the kill radius.
     std::erase_if(s.drones, [&](const Drone& d) {
         if (d.kind != Drone::Kind::Enemy) return false;
-        if (d.status != Drone::Status::Alive) return true;
+        if (d.status != Drone::Status::Alive) {
+            if (d.status == Drone::Status::Detonated) ++s.kill_count;
+            return true;
+        }
         if (s.mission.type == Mission::Sandbox) {
             Vec<2> rel = {d.position[0] - player.position[0], d.position[1] - player.position[1]};
             return length(rel) > sandbox_kill_radius;
@@ -430,7 +541,6 @@ MissionResult game_loop(Window& window,
     float physics_time = 0.0f;
     ShellState pause_shell{};
     bool abandoned = false;
-    MissionResult result{MissionResult::None, 0.0f, 0u};
     while (window.frame() && !abandoned) {
         const float dt = stopwatch.lap();
         if (state.paused) {
@@ -451,7 +561,6 @@ MissionResult game_loop(Window& window,
                     pause_shell.navigation = ShellState::Navigation::None;
                     break;
                 case ShellState::Navigation::Abandon:
-                    result = {MissionResult::None, 0.0f, 0u};
                     abandoned = true;
                     break;
                 default:
@@ -459,9 +568,10 @@ MissionResult game_loop(Window& window,
             }
             continue;
         }
+        if (mission.test_time_limit > 0 && state.tick * Physics::dt >= mission.test_time_limit)
+            break;
         // Normal game loop execution
-        if (mission.time_limit > 0 && state.tick * Physics::dt >= mission.time_limit) break;
-        if (!mission.player_ai) copy_control(window, settings, player_drone(state).control_m);
+        if (!mission.test_player_ai) copy_control(window, settings, player_drone(state).control_m);
         physics_time = std::min(0.25f, physics_time + dt);
         while (physics_time >= Physics::dt) {
             ai.update(state);
@@ -471,7 +581,8 @@ MissionResult game_loop(Window& window,
         game_manager.update(state);
         renderer.draw(window, state, dt);
         audio_engine.update(state);
-        if (window.pressed(Key::esc) || state.paused) {  // pause menu
+        auto finished = state.finish_tick.has_value() && *state.finish_tick <= state.tick;
+        if ((window.pressed(Key::esc) || state.paused) && !finished) {  // pause menu
             state.paused = true;
             pause_shell.screen = ShellState::Screen::Pause;
             pause_shell.navigation = ShellState::Navigation::None;
@@ -481,11 +592,11 @@ MissionResult game_loop(Window& window,
             game_manager.update(state);
             physics_time = 0.0f;
         }
+        if (finished &&
+            (window.pressed(Key::enter) || window.pressed(Key::space) || window.mouse_pressed(1))) {
+            break;
+        }
     }
     window.set_audio_callback({});  // the window's callback can still call into the audio_engine
-    if (!abandoned) {
-        result.time = float(state.timer.value_or(0)) * Physics::dt;
-        result.score = state.kill_count;
-    }
-    return result;
+    return state.result;
 }

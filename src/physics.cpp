@@ -608,7 +608,7 @@ void AI::update(GameState& s) {
         [&](Drone& d, DroneAI& a) {
             if (d.status != Drone::Status::Alive) return;
             if (d.kind == Drone::Kind::Enemy ||
-                (s.mission.player_ai && d.kind == Drone::Kind::Player)) {
+                (s.mission.test_player_ai && d.kind == Drone::Kind::Player)) {
                 steer_drone(s, a, d);
             }
         });

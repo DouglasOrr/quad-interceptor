@@ -506,7 +506,10 @@ void AudioEngine::update(const GameState& game_state) {
     std::lock_guard<std::mutex> lock(state->mutex);
     state->master_volume = state->settings.master_volume;
     state->music_volume = state->settings.music_volume;
-    state->effects_volume = game_state.paused ? 0.0f : state->settings.effects_volume;
+    state->effects_volume = (game_state.paused ||
+                             (game_state.finish_tick && *game_state.finish_tick <= game_state.tick))
+                                ? 0.0f
+                                : state->settings.effects_volume;
     if (!state->last_seed || *state->last_seed != game_state.mission.seed) {
         state->music.reset(static_cast<uint>(game_state.mission.seed));
         state->last_seed = game_state.mission.seed;

@@ -37,15 +37,15 @@ TEST_CASE("game loop runs for a few frames") {
     Renderer renderer;
     Settings settings = Settings::defaults();
     for (auto& mission : Mission::all()) {
-        mission.player_ai = true;
-        mission.time_limit = 0.25f;
+        mission.test_player_ai = true;
+        mission.test_time_limit = 0.25f;
         game_loop(w, renderer, settings, mission);
     }
     for (auto& drone_type : DroneType::all()) {
         auto mission = Mission::all().front();
         mission.player_type = drone_type;
-        mission.player_ai = true;
-        mission.time_limit = 0.25f;
+        mission.test_player_ai = true;
+        mission.test_time_limit = 0.25f;
         game_loop(w, renderer, settings, mission);
     }
 }

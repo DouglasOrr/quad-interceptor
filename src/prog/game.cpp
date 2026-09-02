@@ -13,8 +13,8 @@ int main(int argc, char** argv) {
     const auto missions = Mission::all();
     std::optional<Mission> launch;
     std::optional<DroneType> player_type;
-    std::optional<bool> player_ai;
-    std::optional<float> time_limit;
+    std::optional<bool> test_player_ai;
+    std::optional<float> test_time_limit;
     std::optional<uint64> seed;
     std::optional<WindowMode> window_mode;
     std::optional<bool> vsync;
@@ -60,15 +60,15 @@ int main(int argc, char** argv) {
             }
         } else if (key == "player") {
             if (value == "ai") {
-                player_ai = true;
+                test_player_ai = true;
             } else if (value == "user") {
-                player_ai = false;
+                test_player_ai = false;
             } else {
                 std::cerr << "Error! Unknown player=" << value << std::endl;
                 return 1;
             }
         } else if (key == "timeout") {
-            time_limit = std::atof(std::string(value).c_str());
+            test_time_limit = std::atof(std::string(value).c_str());
         } else if (key == "profile") {
             if (value == "true") {
                 profile_path = std::string(argv[0]) + ".profile";
@@ -132,8 +132,8 @@ int main(int argc, char** argv) {
     if (launch) {
         Mission mission = *launch;
         if (player_type) mission.player_type = *player_type;
-        if (player_ai) mission.player_ai = *player_ai;
-        if (time_limit) mission.time_limit = *time_limit;
+        if (test_player_ai) mission.test_player_ai = *test_player_ai;
+        if (test_time_limit) mission.test_time_limit = *test_time_limit;
         if (seed) mission.seed = *seed;
         Renderer renderer;
         game_loop(window, renderer, settings, mission);

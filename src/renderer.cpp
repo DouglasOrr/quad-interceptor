@@ -1331,7 +1331,12 @@ void main(){
             const Circle& o = s.mission.objectives[i];
             flat.u_radius.set(R);
             flat.u_scale.set(o.radius);
-            flat.u_translate.set(Vec<2>{o.center[0] - p[0], o.center[1] - p[1]});
+            Vec<2> marker_pos = {o.center[0] - p[0], o.center[1] - p[1]};
+            const float dist = length(marker_pos);
+            if (i <= s.next_objective + 1 && dist > R && dist > 0.0f && R > 0.0f) {
+                marker_pos = (R / dist) * marker_pos;
+            }
+            flat.u_translate.set(marker_pos);
             Vec<3> color = (s.mission.type != Mission::Race && s.mission.type != Mission::Tutorial)
                                ? Vec<3>{0.2f, 0.9f, 0.4f}
                            : (i == s.next_objective)     ? Vec<3>{0.2f, 0.9f, 0.4f}
@@ -1498,10 +1503,21 @@ void main(){
         const float timer_y = pad;
         if (s.mission.type == Mission::Race) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
-            std::snprintf(buf, sizeof(buf), "%.1fs", sec);
+            if (s.mission.target_time > 0) {
+                std::snprintf(buf, sizeof(buf), "%.1fs (%.1fs)", sec, s.mission.target_time);
+            } else {
+                std::snprintf(buf, sizeof(buf), "%.1fs", sec);
+            }
+            Vec<3> timer_col = {1.0f, 1.0f, 1.0f};
+            if (sec > s.mission.target_time)
+                timer_col = {1.0f, 0.2f, 0.2f};  // overtime
+            else if (s.finish_tick.has_value())
+                timer_col = {0.3f, 0.9f, 0.4f};  // success
+            else if (s.mission.target_time - sec <= 10.0f)
+                timer_col = {1.0f, 0.9f, 0.2f};  // yellow-flag: 10s to go
             const float timer_w = float(std::strlen(buf)) * font_size[0] * timer_scale;
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
-            text.draw(buf, timer_x, timer_y, timer_scale, {1.0f, 1.0f, 1.0f});
+            text.draw(buf, timer_x, timer_y, timer_scale, timer_col);
         } else if (s.mission.type == Mission::Chase) {
             float sec = float(s.timer.value_or(0)) * Physics::dt;
             std::snprintf(buf, sizeof(buf), "%.1fs  CAUGHT %u", sec, s.kill_count);
@@ -1698,6 +1714,61 @@ struct FpsView {
         const float x = float(vp[2]) - margin - text_w;
         const float top_y = float(vp[3]) - margin - font_size[1] * scale;
         text.draw(label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
+    }
+};
+
+// Simple post-game overlay, shown once a mission's end condition has been met.
+struct PostGameView {
+    Mesh quad;
+
+    PostGameView() { quad.set_vertices(quad2_centered, sizeof(quad2_centered), 2); }
+
+    void draw(const GameState& s, const FlatShader& flat, TextBatch& text) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+
+        // Dim the frozen scene.
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        flat.prog.use();
+        flat.u_use_instancing.set(0);
+        flat.u_mvp.set(mat_diag(1.0f, 1.0f, 1.0f, 1.0f));
+        flat.u_radius.set(0.0f);
+        flat.u_inner.set(0.0f);
+        flat.u_scale.set(2.0f);
+        flat.u_translate.set(Vec<2>{0.0f, 0.0f});
+        flat.u_alpha.set(0.55f);
+        flat.u_color.set(Vec<3>{0.02f, 0.02f, 0.05f});
+        quad.draw();
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        flat.u_alpha.set(1.0f);
+
+        const auto font_size = text.base_font_size();
+        const float cx = float(vp[2]) / 2.0f;
+        const float cy = float(vp[3]) / 2.0f;
+        auto centre = [&](const char* str, float y, float scale, const Vec<3>& color) {
+            const float w = float(std::strlen(str)) * font_size[0] * scale;
+            text.draw(str, cx - w / 2.0f, y, scale, color);
+        };
+
+        constexpr float title_scale = 3.0f;
+        constexpr float line_scale = 1.5f;
+        const float line_h = font_size[1] * line_scale;
+        const bool failed = s.result.type == MissionResult::Failed;
+        centre(failed ? "MISSION FAILED" : "MISSION COMPLETE", cy + line_h / 2 + 2 * line_h,
+               title_scale, failed ? Vec<3>{1.0f, 0.3f, 0.3f} : Vec<3>{0.3f, 0.9f, 0.4f});
+        char info[64];
+        if (s.mission.type == Mission::Race) {
+            std::snprintf(info, sizeof(info), "time: %.1fs (target %.1fs)", s.result.time,
+                          s.mission.target_time);
+        } else {
+            std::snprintf(info, sizeof(info), "enemies destroyed: %u", s.result.score);
+        }
+        centre(info, cy + line_h / 2, line_scale, {1.0f, 1.0f, 1.0f});
+        centre("press ENTER to continue", cy + line_h / 2 - 2 * line_h, line_scale,
+               {0.7f, 0.7f, 0.7f});
     }
 };
 
@@ -2337,7 +2408,7 @@ struct Menus {
         };
 
         if (overlay) {
-            draw_rect(0.0f, 0.0f, vp_w, vp_h, Vec<3>{0.02f, 0.02f, 0.04f}, 0.65f);
+            draw_rect(0.0f, 0.0f, vp_w, vp_h, Vec<3>{0.02f, 0.02f, 0.04f}, 0.75f);
             if (prev_screen == ShellState::Screen::Pause)
                 draw_controls_reminder(text, flat, settings, drone);
         } else {
@@ -2437,6 +2508,7 @@ struct Renderer::State {
     HudView hud;
     PauseButtonView pause_button;
     NoiseOverlayView overlay;
+    PostGameView post_game;
     FpsView fps;
     TextBatch text;
 
@@ -2476,8 +2548,12 @@ void Renderer::draw(Window& window, GameState& s, float dt) {
     // Overlays
     state->minimap.draw(s, state->flat);
     state->hud.draw(s, state->text);
-    state->pause_button.draw(s, window, state->text, state->flat);
     if (player.status != Drone::Status::Alive) state->overlay.draw(s, state->text);
+    if (s.finish_tick.has_value() && *s.finish_tick <= s.tick) {
+        state->post_game.draw(s, state->flat, state->text);
+    } else {
+        state->pause_button.draw(s, window, state->text, state->flat);
+    }
     state->fps.draw(dt, state->text);
 }
 

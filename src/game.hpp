@@ -173,16 +173,26 @@ struct Mission {
     uint64 seed;
     TerrainType terrain_type;
     DroneType player_type;
-    std::vector<Circle> objectives;  // empty in sandbox
-    float enemy_spawn_radius;        // around objective (defense) or player (sandbox, chase)
+    // Mission params
+    std::vector<Circle> objectives;
+    uint max_enemies;
+    float enemy_spawn_radius;  // around objective (defense) or player (sandbox, chase)
     float enemy_spawn_interval;
     float enemy_tilt;
-    uint max_enemies;
     uint starting_lives;
-    float time_limit;
-    bool player_ai;
+    float target_time;  // (race)
+    // Test params
+    float test_time_limit = 0;
+    bool test_player_ai = false;
 
     static std::vector<Mission> all();
+};
+
+struct MissionResult {
+    enum Type : uint8_t { None, Completed, Failed };
+    Type type;
+    float time;
+    uint score;
 };
 
 struct GameState {
@@ -198,6 +208,9 @@ struct GameState {
     uint kill_count;
     uint next_objective;
     std::optional<uint64> timer;
+    // End state
+    std::optional<uint64> finish_tick;
+    MissionResult result;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -239,13 +252,6 @@ struct Settings {
     static std::array<std::tuple<int, int>, 4> resolutions();
     LoadResult load(const std::string& dir);
     void save(const std::string& dir) const;
-};
-
-struct MissionResult {
-    enum Type : uint8_t { None, Completed, Failed };
-    Type type;
-    float time;
-    uint score;
 };
 
 struct ShellState {
