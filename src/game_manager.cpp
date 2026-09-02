@@ -180,8 +180,8 @@ std::vector<Mission> Mission::all() {
     auto drones = DroneType::all();
     auto drone_tilt =
         std::find_if(drones.begin(), drones.end(), [](auto& d) { return d.name == "tilt"; });
-    // auto drone_acro =
-    //     std::find_if(drones.begin(), drones.end(), [](auto& d) { return d.name == "acro"; });
+    auto drone_acro =
+        std::find_if(drones.begin(), drones.end(), [](auto& d) { return d.name == "acro"; });
     TerrainType terrain_plains{.kind = TerrainType::Kind::Plains,
                                .plains = {.pole_prob = 0.06f,
                                           .pole_radius_range = {0.25f, 0.8f},
@@ -192,13 +192,15 @@ std::vector<Mission> Mission::all() {
 
     std::vector<Mission> missions;
 
+    // Tilt ----------------------
+
     missions.push_back({
         .type = Mission::Tutorial,
         .name = "Tutorial",
-        .info = "Learn to fly (tilt mode) -- see the pause menu (ESC or top-left) for controls.\n"
-                "Try to fly to the green objective marker. You'll spot a red dot on your minimap."
-                "That's an enemy drone. Fly close to it to detonate yourself (and it)."
-                "To finish the mission, fly through all green markers and destroy an enemy drone.",
+        .info = "Learn to fly (tilt mode) -- see the pause menu (ESC or top-left) for controls."
+                " Try to fly to the green objective marker. You'll spot a red dot on your minimap."
+                " That's an enemy drone. Fly close to it to detonate yourself (and it)."
+                " To finish the mission, fly through all green markers and destroy an enemy drone.",
         .seed = 0xbf4f139e,
         .terrain_type = terrain_plains,
         .player_type = *drone_tilt,
@@ -255,7 +257,7 @@ std::vector<Mission> Mission::all() {
 
     missions.push_back({
         .type = Mission::Chase,
-        .name = "Chase 101",
+        .name = "Hunting 101",
         .info = "Destroy 5 enemies before you run out of time.",
         .seed = 0x9c58daec,
         .terrain_type = terrain_plains,
@@ -271,6 +273,58 @@ std::vector<Mission> Mission::all() {
         .kill_bonus_time = 10.0f,
         .target_kill_count = 5,
     });
+
+    // Acro ----------------------
+
+    missions.push_back({
+        .type = Mission::Tutorial,
+        .name = "Acro Tutorial",
+        .info = "Learn to fly (acro mode) -- see the pause menu (ESC or top-left) for controls."
+                " Acro mode is harder, but a lot more fun. You control the rate of change rather"
+                " than the tilt angle. To finish the mission, fly through all green markers and"
+                " destroy 3 enemies.",
+        .seed = 0xcc24d21f,
+        .terrain_type = terrain_plains,
+        .player_type = *drone_acro,
+        .objectives =
+            {
+                {Vec<2>{0.0f, 0.0f}, Terrain::cell_size},
+                {Vec<2>{100.0f, 0.0f}, Terrain::cell_size},
+                {Vec<2>{100.0f, 100.0f}, Terrain::cell_size},
+                {Vec<2>{0.0f, 100.0f}, Terrain::cell_size},
+                {Vec<2>{0.0f, -100.0f}, Terrain::cell_size},
+            },
+        .max_enemies = 3,
+        .enemy_spawn_radius = 3.0f * Terrain::cell_size,
+        .enemy_spawn_alt = {18.0f, 22.0f},
+        .enemy_spawn_interval = 10.0f,
+        .enemy_tilt = 0.0f,
+        .starting_lives = 0,
+        .target_time = 0,
+        .kill_bonus_time = 0,
+        .target_kill_count = 3,
+    });
+
+    missions.push_back({
+        .type = Mission::Chase,
+        .name = "Acrobatic Hunting",
+        .info = "Destroy 5 enemies before you run out of time.",
+        .seed = 0x54c6dfb1,
+        .terrain_type = terrain_plains,
+        .player_type = *drone_acro,
+        .objectives = {},
+        .max_enemies = 1,
+        .enemy_spawn_radius = 80.0f,
+        .enemy_spawn_alt = {15.0f, 30.0f},
+        .enemy_spawn_interval = 1.0f,
+        .enemy_tilt = 1.0f,
+        .starting_lives = 0,
+        .target_time = 60.0f,
+        .kill_bonus_time = 15.0f,
+        .target_kill_count = 5,
+    });
+
+    // City ----------------------
 
     // auto city = TerrainType{.kind = TerrainType::Kind::City,
     //                         .city = {.lock_on_level = 80.0f,
