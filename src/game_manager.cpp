@@ -35,7 +35,8 @@ Font Font::load() {
 // GameManager
 
 namespace {
-constexpr float respawn_delay = 2.0f;
+constexpr float respawn_delay_detonation = 1.0f;
+constexpr float respawn_delay_crash = 3.0f;
 constexpr float finish_delay = 2.0f;
 constexpr float player_spawn_alt = 20.0f;
 constexpr float enemy_spawn_alt = 20.0f;
@@ -434,8 +435,10 @@ void GameManager::update(GameState& s) {
     if (player.status == Drone::Status::Alive) {
         state->player_respawn_tick = 0;
     } else {
+        const float delay = (player.status == Drone::Status::Detonated) ? respawn_delay_detonation
+                                                                        : respawn_delay_crash;
         if (state->player_respawn_tick == 0)
-            state->player_respawn_tick = s.tick + uint64(respawn_delay / Physics::dt);
+            state->player_respawn_tick = s.tick + uint64(delay / Physics::dt);
         if (s.tick >= state->player_respawn_tick) {
             state->player_respawn_tick = 0;
             spawn_drone(state->next_drone_id, s, Drone::Kind::Player, s.mission.player_type,
