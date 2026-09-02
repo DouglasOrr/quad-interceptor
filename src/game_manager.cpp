@@ -189,7 +189,18 @@ std::vector<Mission> Mission::all() {
                                           .pylon_run_prob = 1.0f,
                                           .pylon_row_period = 48,
                                           .pylon_stride = 4}};
-
+    TerrainType terrain_city{.kind = TerrainType::Kind::City,
+                             .city = {.lock_on_level = 80.0f,
+                                      .block_size = 10,
+                                      .street_size = 2,
+                                      .building_height_range = {10.0f, 100.0f},
+                                      .stilt_prob = 0.5f,
+                                      .stilt_podium_range = {1.0f, 40.0f},
+                                      .stilt_gap_range = {5.0f, 20.0f},
+                                      .skywalk_prob = 0.5f,
+                                      .skywalk_height_range = {10.0f, 80.0f}}};
+    auto C = Terrain::cell_size;
+    auto B = terrain_city.city.block_size;
     std::vector<Mission> missions;
 
     // Tilt ----------------------
@@ -206,13 +217,13 @@ std::vector<Mission> Mission::all() {
         .player_type = *drone_tilt,
         .objectives =
             {
-                {Vec<2>{0.0f, 0.0f}, Terrain::cell_size},
-                {Vec<2>{100.0f, 0.0f}, Terrain::cell_size},
-                {Vec<2>{-100.0f, 300.0f}, Terrain::cell_size},
-                {Vec<2>{-100.0f, -300.0f}, Terrain::cell_size},
+                {Vec<2>{0.0f, 0.0f}, C},
+                {Vec<2>{100.0f, 0.0f}, C},
+                {Vec<2>{-100.0f, 300.0f}, C},
+                {Vec<2>{-100.0f, -300.0f}, C},
             },
         .max_enemies = 1,
-        .enemy_spawn_radius = 4.0f * Terrain::cell_size,
+        .enemy_spawn_radius = 4.0f * C,
         .enemy_spawn_alt = {18.0f, 22.0f},
         .enemy_spawn_interval = 20.0f,
         .enemy_tilt = 0.0f,
@@ -231,18 +242,18 @@ std::vector<Mission> Mission::all() {
         .player_type = *drone_tilt,
         .objectives =
             {
-                {Vec<2>{0.0f, -50.0f}, Terrain::cell_size},
-                {Vec<2>{100.0f, -50.0f}, Terrain::cell_size},
-                {Vec<2>{150.0f, -150.0f}, Terrain::cell_size},
-                {Vec<2>{100.0f, -250.0f}, Terrain::cell_size},
-                {Vec<2>{0.0f, -100.0f}, Terrain::cell_size},
-                {Vec<2>{-25.0f, 10.0f}, Terrain::cell_size / 2},
-                {Vec<2>{-80.0f, -5.0f}, Terrain::cell_size / 2},
-                {Vec<2>{-120.0f, 10.0f}, Terrain::cell_size / 2},
-                {Vec<2>{-160.0f, -5.0f}, Terrain::cell_size / 2},
-                {Vec<2>{-200.0f, 5.0f}, Terrain::cell_size / 2},
-                {Vec<2>{-240.0f, -5.0f}, Terrain::cell_size / 2},
-                {Vec<2>{-0.0f, 40.0f}, Terrain::cell_size},
+                {Vec<2>{0.0f, -50.0f}, C},
+                {Vec<2>{100.0f, -50.0f}, C},
+                {Vec<2>{150.0f, -150.0f}, C},
+                {Vec<2>{100.0f, -250.0f}, C},
+                {Vec<2>{0.0f, -100.0f}, C},
+                {Vec<2>{-25.0f, 10.0f}, C / 2},
+                {Vec<2>{-80.0f, -5.0f}, C / 2},
+                {Vec<2>{-120.0f, 10.0f}, C / 2},
+                {Vec<2>{-160.0f, -5.0f}, C / 2},
+                {Vec<2>{-200.0f, 5.0f}, C / 2},
+                {Vec<2>{-240.0f, -5.0f}, C / 2},
+                {Vec<2>{-0.0f, 40.0f}, C},
             },
         .max_enemies = 0,
         .enemy_spawn_radius = 0,
@@ -288,14 +299,14 @@ std::vector<Mission> Mission::all() {
         .player_type = *drone_acro,
         .objectives =
             {
-                {Vec<2>{0.0f, 0.0f}, Terrain::cell_size},
-                {Vec<2>{100.0f, 0.0f}, Terrain::cell_size},
-                {Vec<2>{100.0f, 100.0f}, Terrain::cell_size},
-                {Vec<2>{0.0f, 100.0f}, Terrain::cell_size},
-                {Vec<2>{0.0f, -100.0f}, Terrain::cell_size},
+                {Vec<2>{0.0f, 0.0f}, C},
+                {Vec<2>{100.0f, 0.0f}, C},
+                {Vec<2>{100.0f, 100.0f}, C},
+                {Vec<2>{0.0f, 100.0f}, C},
+                {Vec<2>{0.0f, -100.0f}, C},
             },
         .max_enemies = 3,
-        .enemy_spawn_radius = 3.0f * Terrain::cell_size,
+        .enemy_spawn_radius = 3.0f * C,
         .enemy_spawn_alt = {18.0f, 22.0f},
         .enemy_spawn_interval = 10.0f,
         .enemy_tilt = 0.0f,
@@ -325,6 +336,78 @@ std::vector<Mission> Mission::all() {
     });
 
     // City ----------------------
+
+    auto city_circuit = [&](const std::vector<std::tuple<float, float>>& blocks) {
+        std::vector<Circle> objectives;
+        for (auto [bx, by] : blocks) {
+            objectives.push_back(
+                {terrain_city.city.snap_intersection({bx * B * C, by * B * C}), C});
+        }
+        return objectives;
+    };
+
+    missions.push_back({
+        .type = Mission::Race,
+        .name = "City Racer",
+        .info = "Complete the course as fast as possible. Note that cities have an altitude limit;"
+                " above this altitude, an enemy signal jammer will eventually lock on to you, and"
+                " your connection will be lost.",
+        .seed = 0xf80a9b64,
+        .terrain_type = terrain_city,
+        .player_type = *drone_acro,
+        .objectives = city_circuit({
+            {0, 0},
+            {1, 0},
+            {2, 0},
+            {2, -1},
+            {2, -2},
+            {3, -2},
+            {4, -3},
+        }),
+        .max_enemies = 0,
+        .enemy_spawn_radius = 0,
+        .enemy_spawn_alt = {0.0f, 0.0f},
+        .enemy_spawn_interval = 0,
+        .enemy_tilt = 0,
+        .starting_lives = 0,
+        .target_time = 120.0f,
+        .kill_bonus_time = 0,
+        .target_kill_count = 0,
+    });
+
+    missions.push_back({
+        .type = Mission::Race,
+        .name = "City Slicker",
+        .info = "Complete the course as fast as possible.",
+        .seed = 0x13fcea1e,
+        .terrain_type = terrain_city,
+        .player_type = *drone_acro,
+        .objectives = city_circuit({
+            {0, 0},
+            {1, 0},
+            {1, 1},
+            {0, 2},
+            {-2, 2},
+            {-3, 1},
+            {-2, 0},
+            {-1, 0},
+            {-1, -1},
+            {0, -1},
+            {0, -2},
+            {1, -3},
+            {4, -3},
+            {3, -2},
+        }),
+        .max_enemies = 0,
+        .enemy_spawn_radius = 0,
+        .enemy_spawn_alt = {0.0f, 0.0f},
+        .enemy_spawn_interval = 0,
+        .enemy_tilt = 0,
+        .starting_lives = 0,
+        .target_time = 180.0f,
+        .kill_bonus_time = 0,
+        .target_kill_count = 0,
+    });
 
     // auto city = TerrainType{.kind = TerrainType::Kind::City,
     //                         .city = {.lock_on_level = 80.0f,
