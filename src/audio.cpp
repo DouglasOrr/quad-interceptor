@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <mutex>
 #include <vector>
 
@@ -505,6 +506,7 @@ struct AudioEngine::State {
     float master_volume = 1.0f;
     float music_volume = 1.0f;
     float effects_volume = 1.0f;
+    bool started = false;  // first update() has applied the mission volume/seed
     std::vector<float> mix_buf;
     Effects effects;
     Music music;
@@ -529,10 +531,15 @@ void AudioEngine::update(const GameState& game_state) {
         state->last_seed = game_state.mission.seed;
     }
     state->effects.update(game_state);
+    state->started = true;
 }
 
 void AudioEngine::fill_buffer(int16_t* stream, int num_samples) {
     std::lock_guard<std::mutex> lock(state->mutex);
+    if (!state->started) {  // mute if update() hasn't been called
+        std::memset(stream, 0, size_t(num_samples) * 2 * sizeof(int16_t));
+        return;
+    }
 
     state->mix_buf.assign(num_samples * 2, 0.0f);
     state->effects.render(state->mix_buf, state->effects_volume);
