@@ -2582,7 +2582,7 @@ struct Menus {
         if (view.footer && *view.footer) {
             const float fw = float(std::strlen(view.footer)) * view.font_size[0];
             text.draw(view.footer, vp_w / 2.0f - fw / 2.0f, 0.5f * view.margin, 1.0f,
-                      {0.6f, 0.6f, 0.6f});
+                      {0.8f, 0.8f, 0.8f});
         }
     }
 };
