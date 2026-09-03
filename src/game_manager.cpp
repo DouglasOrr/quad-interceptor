@@ -61,14 +61,51 @@ Vec<2> spawn_pos(const GameState& s, Vec<2> target) {
 
 Vec<3> player_spawn(const GameState& s, const std::optional<Drone>& player) {
     Vec<2> c;
-    if (s.mission.type == Mission::Chase && player) {
+    if (s.mission.type == Mission::Defense && player) {
+        Vec<2> ref = Vec<2>{player->position[0], player->position[1]};
+        c = s.mission.objectives[0].center;
+        float best = length(ref - c);
+        for (const auto& o : s.mission.objectives) {
+            auto d = length(ref - o.center);
+            if (d < best) {
+                best = d;
+                c = o.center;
+            }
+        }
+    } else if (s.mission.type == Mission::Chase && player) {
         c = spawn_pos(s, {player->position[0], player->position[1]});
-    } else if (s.mission.objectives.empty()) {
-        c = spawn_pos(s, {0.0f, 0.0f});
-    } else {
+    } else if (!s.mission.objectives.empty()) {
         c = s.mission.objectives[std::max(s.next_objective, 1u) - 1].center;
+    } else {
+        c = spawn_pos(s, {0.0f, 0.0f});
     }
     return {c[0], c[1], player_spawn_alt};
+}
+
+Vec<3> enemy_spawn(const GameState& s, uint64 seed) {
+    auto& objectives = s.mission.objectives;
+    const float radius = s.mission.enemy_spawn_radius;
+    const uint64 h0 = hash(seed, 0xa4a6d5a7, s.tick);
+    const float alt = hash_u(h0, 16, s.mission.enemy_spawn_alt[0], s.mission.enemy_spawn_alt[1]);
+
+    Vec<2> center;
+    if (objectives.empty()) {
+        auto& player = player_drone(s);
+        center = {player.position[0], player.position[1]};
+    } else {
+        center = objectives[h0 % objectives.size()].center;
+    }
+    for (uint i = 0; true; ++i) {  // rejection sample - don't land directly on an objective
+        uint64 h = hash(h0, uint64(i));
+        Vec<2> p = spawn_pos(s, {center[0] + radius * std::cos(hash_u(h, 0, 0.0f, 2.0f * pi)),
+                                 center[1] + radius * std::sin(hash_u(h, 16, 0.0f, 2.0f * pi))});
+        auto on_objective = std::any_of(objectives.begin(), objectives.end(),
+                                        [p](auto& o) { return length(p - o.center) <= o.radius; });
+        if (!on_objective || i >= 32) {
+            return {p[0], p[1], alt};
+        }
+    }
+    gassert(false && "unreachable");
 }
 
 Drone& spawn_drone(uint& next_drone_id,
@@ -376,6 +413,44 @@ std::vector<Mission> Mission::all() {
     });
 
     missions.push_back({
+        .type = Mission::Chase,
+        .name = "Urban Fox",
+        .info = "Destroy 5 enemies before you run out of time.",
+        .seed = 0xbace38d1,
+        .terrain_type = terrain_city,
+        .player_type = *drone_acro,
+        .objectives = {},
+        .max_enemies = 3,
+        .enemy_spawn_radius = B * C,
+        .enemy_spawn_alt = {5.0f, 80.0f},
+        .enemy_spawn_interval = 5.0f,
+        .enemy_tilt = 0.8f,
+        .starting_lives = 0,
+        .target_time = 60.0f,
+        .kill_bonus_time = 20.0f,
+        .target_kill_count = 5,
+    });
+
+    missions.push_back({
+        .type = Mission::Defense,
+        .name = "Defender of the State",
+        .info = "Stop enemies from reaching the objectives.",
+        .seed = 0x04d4dd8d,
+        .terrain_type = terrain_city,
+        .player_type = *drone_acro,
+        .objectives = city_circuit({{0, 0}, {1, 0}}),
+        .max_enemies = 2,
+        .enemy_spawn_radius = 2 * B * C,
+        .enemy_spawn_alt = {15.0f, 40.0f},
+        .enemy_spawn_interval = 10.0f,
+        .enemy_tilt = 0.75f,
+        .starting_lives = 3,
+        .target_time = 180.0f,
+        .kill_bonus_time = 0,
+        .target_kill_count = 0,
+    });
+
+    missions.push_back({
         .type = Mission::Race,
         .name = "City Slicker",
         .info = "Complete the course as fast as possible.",
@@ -533,7 +608,7 @@ struct GameManager::State {
     uint64 player_respawn_tick = 0;
     uint64 next_enemy_spawn_tick = 0;
     uint64 race_start_tick = 0;
-    uint64 chase_prev_tick = 0;
+    uint64 countdown_prev_tick = 0;
 };
 
 GameManager::GameManager() : state(std::make_unique<State>()) {}
@@ -561,16 +636,30 @@ void GameManager::update(GameState& s) {
                 }
             }
         }
+        if (s.result.type == MissionResult::None) {
+            if (!s.timer.has_value()) {
+                s.timer = uint64(s.mission.target_time / Physics::dt);
+            } else {
+                auto elapsed = s.tick - state->countdown_prev_tick;
+                if (*s.timer > 0) *s.timer = *s.timer > elapsed ? *s.timer - elapsed : 0;
+            }
+            state->countdown_prev_tick = s.tick;
+            const float time = float(s.timer.value_or(0)) * Physics::dt;
+            if (*s.timer == 0) {
+                s.result = {MissionResult::Completed, time, s.kill_count};
+            } else if (s.lives == 0) {
+                s.result = {MissionResult::Failed, time, s.kill_count};
+            }
+        }
     }
     if (s.mission.type == Mission::Chase && s.result.type == MissionResult::None) {
         if (!s.timer.has_value()) {
             s.timer = uint64(s.mission.target_time / Physics::dt);
-            state->chase_prev_tick = s.tick;
         } else {
-            auto elapsed = s.tick - state->chase_prev_tick;
+            auto elapsed = s.tick - state->countdown_prev_tick;
             if (*s.timer > 0) *s.timer = *s.timer > elapsed ? *s.timer - elapsed : 0;
-            state->chase_prev_tick = s.tick;
         }
+        state->countdown_prev_tick = s.tick;
         if (!s.finish_tick.has_value()) {
             const float time = float(s.timer.value_or(0)) * Physics::dt;
             if (s.kill_count >= s.mission.target_kill_count) {
@@ -653,27 +742,17 @@ void GameManager::update(GameState& s) {
     });
 
     // Enemy spawn
-    if (state->next_enemy_spawn_tick == 0) {
-        state->next_enemy_spawn_tick =
-            s.tick + uint64(s.mission.enemy_spawn_interval / Physics::dt);
-    } else if (s.tick >= state->next_enemy_spawn_tick) {
+    if (s.tick >= state->next_enemy_spawn_tick) {
         size_t enemy_count = 0;
         foreach_drone(s, [&](size_t, const Drone& d) {
             if (d.kind == Drone::Kind::Enemy) ++enemy_count;
         });
         if (enemy_count < s.mission.max_enemies) {
             uint64 h = hash(s.terrain.seed, s.tick, state->next_drone_id);
-            float angle = hash_u(h, 0, 0.0f, 2.0f * pi);
-            Vec<2> center = s.mission.objectives.empty()
-                                ? Vec<2>{player.position[0], player.position[1]}
-                                : s.mission.objectives[0].center;
-            Vec<2> target_pos = {center[0] + s.mission.enemy_spawn_radius * std::cos(angle),
-                                 center[1] + s.mission.enemy_spawn_radius * std::sin(angle)};
-            Vec<2> spawn_xy = spawn_pos(s, target_pos);
-            float alt = hash_u(h, 16, s.mission.enemy_spawn_alt[0], s.mission.enemy_spawn_alt[1]);
             spawn_drone(state->next_drone_id, s, Drone::Kind::Enemy, DroneType::enemy(),
-                        {spawn_xy[0], spawn_xy[1], alt});
-            state->next_enemy_spawn_tick = 0;
+                        enemy_spawn(s, h));
+            state->next_enemy_spawn_tick =
+                s.tick + uint64(s.mission.enemy_spawn_interval / Physics::dt);
         }
     }
 

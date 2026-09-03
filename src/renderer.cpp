@@ -1493,12 +1493,6 @@ void main(){
         std::snprintf(buf, sizeof(buf), "SPD %3d", spd_v);
         text.draw(buf, text_x, text_y0 + line_h * 2.0f, scale, {1.0f, 1.0f, 1.0f});
 
-        if (s.mission.starting_lives) {
-            std::snprintf(buf, sizeof(buf), "LIVES %1d", s.lives);
-            Vec<3> lives_col = (s.lives > 1) ? Vec<3>{0.2f, 0.9f, 0.4f} : Vec<3>{1.0f, 0.2f, 0.2f};
-            text.draw(buf, text_x, text_y0 + line_h * 3.0f, scale, lives_col);
-        }
-
         const float timer_scale = 1.5f;
         const float timer_y = pad;
         if (s.mission.type == Mission::Race) {
@@ -1523,6 +1517,18 @@ void main(){
             std::snprintf(buf, sizeof(buf), "%.1f s (destroyed %u/%u)", sec, s.kill_count,
                           s.mission.target_kill_count);
             Vec<3> timer_col = (sec < 10.0f) ? Vec<3>{1.0f, 0.9f, 0.2f} : Vec<3>{1.0f, 1.0f, 1.0f};
+            const float timer_w = float(std::strlen(buf)) * font_size[0] * timer_scale;
+            const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
+            text.draw(buf, timer_x, timer_y, timer_scale, timer_col);
+        } else if (s.mission.type == Mission::Defense) {
+            float sec = float(s.timer.value_or(0)) * Physics::dt;
+            std::snprintf(buf, sizeof(buf), "%u/%u LIVES (%.1fs)", s.lives,
+                          s.mission.starting_lives, sec);
+            Vec<3> timer_col = {1.0f, 1.0f, 1.0f};
+            if (s.lives == 0)
+                timer_col = {1.0f, 0.2f, 0.2f};
+            else if (s.lives == 1)
+                timer_col = {1.0f, 0.9f, 0.2f};
             const float timer_w = float(std::strlen(buf)) * font_size[0] * timer_scale;
             const float timer_x = float(vp[2]) / 2.0f - timer_w / 2.0f;
             text.draw(buf, timer_x, timer_y, timer_scale, timer_col);
