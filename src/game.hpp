@@ -295,6 +295,7 @@ struct GameManager {
     GameManager();
     ~GameManager();
 
+    void reset();
     void update(GameState& state);
 
 private:

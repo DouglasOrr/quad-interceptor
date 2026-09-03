@@ -499,6 +499,10 @@ struct GameManager::State {
 GameManager::GameManager() : state(std::make_unique<State>()) {}
 GameManager::~GameManager() = default;
 
+void GameManager::reset() {
+    *state = State{};
+}
+
 void GameManager::update(GameState& s) {
     // Ensure a player exists (initial spawn / after a dead player is cleaned up).
     bool has_player = std::any_of(s.drones.begin(), s.drones.end(),
@@ -717,6 +721,7 @@ MissionResult game_loop(Window& window,
                     break;
                 case ShellState::Navigation::Restart:
                     init_state();
+                    game_manager.reset();
                     game_manager.update(state);
                     physics_time = 0.0f;
                     pause_shell.navigation = ShellState::Navigation::None;
@@ -749,6 +754,7 @@ MissionResult game_loop(Window& window,
             pause_shell.navigation = ShellState::Navigation::None;
         }
         if (window.pressed(Key::hash)) {  // instant restart shortcut
+            game_manager.reset();
             init_state();
             game_manager.update(state);
             physics_time = 0.0f;
