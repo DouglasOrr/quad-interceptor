@@ -1,0 +1,28 @@
+Quad Interceptor
+================
+
+A compact quadcopter simulation game.
+
+Requirements
+------------
+
+Linux with the SDL2 and OpenGL 3.3 runtime libraries. On Debian/Ubuntu:
+
+    apt install libsdl2-2.0-0 libgl1 libegl1 libgl1-mesa-dri
+
+Audio (optional) needs a working sound system (ALSA/PulseAudio).
+
+Play
+----
+
+    ./quad-interceptor
+
+Controls (default preset)
+-------------------------
+
+    J/L     roll left/right
+    I/K     pitch forward/back
+    W/S     up/down (lift)
+    A/D     rotate left/right (yaw)
+    Esc     pause menu / back
+    Enter   confirm

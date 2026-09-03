@@ -4,14 +4,15 @@
 
 import argparse
 import hashlib
-import re
 import json
+import re
 import statistics
 import struct
 import subprocess
 import sys
 import time
 import urllib.request
+import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Generator
@@ -304,6 +305,20 @@ def run(
         if proc is not None and proc.poll() is None:
             proc.terminate()
             proc.wait()
+
+
+@cli()
+def package(variant: str) -> None:
+    """build the game and zip it with install instructions"""
+    game = ROOT / "build" / variant / "game"
+    if not game.exists():
+        build(variant, ("game",))
+    out = ROOT / "build" / f"quad-interceptor-{variant}.zip"
+    install = ROOT / "docs" / "install.txt"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(game, "quad-interceptor")
+        zf.write(install, "install.txt")
+    print(f"  {out.stat().st_size:,} bytes  {out.relative_to(ROOT)}")
 
 
 @cli()
