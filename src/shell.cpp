@@ -138,8 +138,8 @@ const char* Action::name(Type a) {
 }
 
 std::string get_config_dir() {
-    if (const char* env = std::getenv("SMALLGAME_CONFIG_DIR"); env && *env) return env;
-    if (std::string pref = Window::pref_path("SmallGame"); !pref.empty()) return pref;
+    if (const char* env = std::getenv("QUAD_INTERCEPTOR_CONFIG_DIR"); env && *env) return env;
+    if (std::string pref = Window::pref_path("QuadInterceptor"); !pref.empty()) return pref;
     return ".";
 }
 

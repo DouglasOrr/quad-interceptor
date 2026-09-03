@@ -1,6 +1,6 @@
-# Small Game
+# Quad Interceptor
 
-Creating a small game that consumes < 1.44 MB on disk, so as to [fit on a floppy](https://2pgarcade.com/contest-144mb.html).
+An ultra-small quadcopter simulation game that consumes < 1.44 MB on disk, so as to [fit on a floppy](https://2pgarcade.com/contest-144mb.html).
 
 ## Setup
 

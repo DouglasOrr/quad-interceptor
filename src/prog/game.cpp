@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
     }
 
     if (config_dir_) {
-        if (setenv("SMALLGAME_CONFIG_DIR", config_dir_->c_str(), 1) != 0) {
+        if (setenv("QUAD_INTERCEPTOR_CONFIG_DIR", config_dir_->c_str(), 1) != 0) {
             std::cerr << "Error! setenv failed" << std::endl;
             return 1;
         }
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
     }
 
     Window window({
-        .title = "Small Game",
+        .title = "Quad Interceptor",
         .mode = settings.fullscreen ? WindowMode::Fullscreen : WindowMode::Windowed,
         .width = settings.window_width,
         .height = settings.window_height,

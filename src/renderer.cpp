@@ -2003,7 +2003,7 @@ struct Menus {
         view.margin = 0.15f * std::min(vp[0], vp[1]);
         switch (shell.screen) {
             case ShellState::Screen::Main:
-                view.title = "SMALL GAME";
+                view.title = "QUAD INTERCEPTOR";
                 view.footer = "up/down: move | enter: select | esc: quit";
                 view.items.push_back(plain_item("Play"));
                 view.items.push_back(plain_item("Settings"));

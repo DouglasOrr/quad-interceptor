@@ -17,7 +17,7 @@ std::string temp_dir() {
     static uint counter = 0;
     std::string dir =
         (std::filesystem::temp_directory_path() /
-         ("smallgame_test" + std::to_string(::getpid()) + "_" + std::to_string(++counter)))
+         ("quadinterceptor_test" + std::to_string(::getpid()) + "_" + std::to_string(++counter)))
             .string();
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir);
@@ -27,7 +27,7 @@ std::string temp_dir() {
 
 TEST_CASE("game loop runs for a few frames") {
     Window w({
-        .title = "Test (Small Game)",
+        .title = "Quad Interceptor (Test)",
         .mode = WindowMode::Windowed,
         .width = 1000,
         .height = 600,
@@ -97,7 +97,7 @@ TEST_CASE("AI mean time between crashes on city terrain") {
 
 TEST_CASE("shell_loop runs") {
     Window w({
-        .title = "Test (Small Game)",
+        .title = "Test (Quad Interceptor)",
         .mode = WindowMode::Windowed,
         .width = 1000,
         .height = 600,
@@ -106,12 +106,12 @@ TEST_CASE("shell_loop runs") {
         .profile_path = "",
     });
     const std::string dir = temp_dir();
-    setenv("SMALLGAME_CONFIG_DIR", dir.c_str(), 1);
+    setenv("QUAD_INTERCEPTOR_CONFIG_DIR", dir.c_str(), 1);
     Settings settings = Settings::defaults();
     w.test_press_after(Key::esc, 0.25f);
 
     shell_loop(w, settings);
-    unsetenv("SMALLGAME_CONFIG_DIR");
+    unsetenv("QUAD_INTERCEPTOR_CONFIG_DIR");
 }
 
 TEST_CASE("settings round-trip") {
