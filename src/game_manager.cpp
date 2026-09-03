@@ -485,6 +485,48 @@ std::vector<Mission> Mission::all() {
         .target_kill_count = 0,
     });
 
+    // Sandbox ----------------------
+
+    missions.push_back({
+        .type = Mission::Sandbox,
+        .name = "Plains Sandbox",
+        .info = "Free flight over the open plains. No objectives, no time limit."
+                " Enemy drones present to keep you company.",
+        .seed = 0x8a1ab115,
+        .terrain_type = terrain_plains,
+        .player_type = *drone_acro,
+        .objectives = {},
+        .max_enemies = 5,
+        .enemy_spawn_radius = 10.0f * C,
+        .enemy_spawn_alt = {15.0f, 30.0f},
+        .enemy_spawn_interval = 15.0f,
+        .enemy_tilt = 0.8f,
+        .starting_lives = 0,
+        .target_time = 0,
+        .kill_bonus_time = 0,
+        .target_kill_count = 0,
+    });
+
+    missions.push_back({
+        .type = Mission::Sandbox,
+        .name = "City Sandbox",
+        .info = "Free flight in the infinite city. No objectives, no time limit."
+                " Enemy drones present to keep you company.",
+        .seed = 0xd6134a2b,
+        .terrain_type = terrain_city,
+        .player_type = *drone_acro,
+        .objectives = {},
+        .max_enemies = 5,
+        .enemy_spawn_radius = 3.0f * B * C,
+        .enemy_spawn_alt = {5.0f, 60.0f},
+        .enemy_spawn_interval = 15.0f,
+        .enemy_tilt = 0.8f,
+        .starting_lives = 0,
+        .target_time = 0,
+        .kill_bonus_time = 0,
+        .target_kill_count = 0,
+    });
+
     return missions;
 }
 

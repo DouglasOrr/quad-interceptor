@@ -2014,10 +2014,18 @@ struct Menus {
                 view.footer = "esc: back | complete a mission to unlock the next";
                 auto missions = Mission::all();
                 for (size_t i = 0; i < shell.missions.size(); ++i) {
+                    // spacer above sandbox missions
+                    if (missions[i].type == Mission::Sandbox &&
+                        (i != 0 && missions[i - 1].type != Mission::Sandbox)) {
+                        view.items.push_back(spacer_item());
+                    }
                     const auto& ms = shell.missions[i];
                     auto it = plain_item(ms.name.c_str(), ms.unlocked);
+                    it.data = int(i);
                     if (!ms.unlocked) {
                         it.value = "locked";
+                    } else if (missions[i].type == Mission::Sandbox) {
+                        it.value = "";
                     } else if (ms.best.type != MissionResult::Completed) {
                         it.value = "new";
                     } else if (missions[i].type == Mission::Race) {
@@ -2233,8 +2241,10 @@ struct Menus {
                 if (cursor == int(view.items.size()) - 1) {  // Back row
                     shell.screen = ShellState::Screen::Main;
                 } else {
-                    gassert(shell.missions[size_t(cursor)].unlocked);
-                    shell.chosen = Mission::all()[size_t(cursor)];
+                    const int idx = m_item.data;
+                    gassert(idx >= 0 && idx < int(shell.missions.size()));
+                    gassert(shell.missions[size_t(idx)].unlocked);
+                    shell.chosen = Mission::all()[size_t(idx)];
                     shell.navigation = ShellState::Navigation::Play;
                 }
                 break;

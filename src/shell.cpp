@@ -294,6 +294,8 @@ ShellState load_shell(const std::string& dir) {
             {.name = m.name, .best = {MissionResult::None, 0.0f, 0u}, .unlocked = false});
     }
     shell.missions.front().unlocked = true;  // first mission always unlocked
+    for (size_t i = 0; i < all_missions.size(); ++i)
+        if (all_missions[i].type == Mission::Sandbox) shell.missions[i].unlocked = true;
     auto current_mission = shell.missions.end();
     std::string line;
     std::ifstream in(dir + "/" + progress_file);
