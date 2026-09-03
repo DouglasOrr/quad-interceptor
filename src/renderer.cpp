@@ -1938,6 +1938,7 @@ struct Menus {
             case ShellState::Screen::Missions: {
                 view.title = "MISSIONS";
                 view.footer = "esc: back | complete a mission to unlock the next";
+                auto missions = Mission::all();
                 for (size_t i = 0; i < shell.missions.size(); ++i) {
                     const auto& ms = shell.missions[i];
                     auto it = plain_item(ms.name.c_str(), ms.unlocked);
@@ -1945,10 +1946,14 @@ struct Menus {
                         it.value = "locked";
                     } else if (ms.best.type != MissionResult::Completed) {
                         it.value = "new";
+                    } else if (missions[i].type == Mission::Race) {
+                        it.value = fmt_str(ms.best.time, "completed (%.1fs)");
+                    } else if (missions[i].type == Mission::Chase) {
+                        it.value = fmt_str(ms.best.time, "completed (%.1fs left)");
+                    } else if (missions[i].type == Mission::Defense) {
+                        it.value = fmt_str(ms.best.score, "completed (%.0f kills)");
                     } else {
-                        it.value = "best";
-                        if (ms.best.time > 0.0f) it.value += " " + fmt_str(ms.best.time, "%.1fs");
-                        if (ms.best.score > 0) it.value += " " + fmt_int(ms.best.score);
+                        it.value = "completed";
                     }
                     view.items.push_back(std::move(it));
                 }
