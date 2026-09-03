@@ -29,9 +29,11 @@ constexpr float motor_max_freq = 500.0f;
 constexpr float motor_freq_slew = 1000.0f;  // max pitch change, Hz per second
 constexpr float motor_speed_gain_floor = 0.1f;
 constexpr float motor_speed_gain_scale = 2.0f;
+constexpr float motor_speed_smooth_rate = 1.0f / 0.25f;  // tilt mode only
 
 // Player motor muffling
 constexpr float player_gain = 0.4f;
+constexpr float player_tilt_gain = 0.5f;    // extra muffling in tilt mode
 constexpr float player_lp_cutoff = 800.0f;  // Hz
 
 constexpr float music_gain = 8000.0f;
@@ -60,6 +62,7 @@ struct Effects {
     struct DroneAudio {
         uint id;
         Drone::Kind kind;
+        bool tilt;
         Drone::Status status;
         std::array<MotorAudio, 4> motors;
     };
@@ -91,10 +94,12 @@ struct Effects {
                     motors[m].audio_freq = 0;
                     motors[m].doppler = 1.0f;
                     motors[m].audio_phase = 0.5f * (noise.next() + 1.0f);
+                    motors[m].speed = 0;
                 }
                 return DroneAudio{
                     .id = d.id,
                     .kind = d.kind,
+                    .tilt = d.type.pid_roll_angle.has_value(),
                     .status = d.status,
                     .motors = motors,
                 };
@@ -106,8 +111,14 @@ struct Effects {
                     auto motor_pos = d.position + rotate(d.orientation, motor_offsets_m[m]);
                     auto cam_to_motor = motor_pos - game_state.camera_pos;
                     da.motors[m].cam_to_motor = cam_to_motor;
-                    da.motors[m].speed =
+                    float target_speed =
                         std::min(d.motor_speed[m], motor_max_speed) / motor_max_speed;
+                    if (d.kind == Drone::Kind::Player && da.tilt) {
+                        float k = 1.0f - std::exp(-motor_speed_smooth_rate * std::min(dt, 0.1f));
+                        da.motors[m].speed += k * (target_speed - da.motors[m].speed);
+                    } else {
+                        da.motors[m].speed = target_speed;
+                    }
 
                     float dist = length(cam_to_motor);
                     if (dist > 1e-4f) {
@@ -136,7 +147,10 @@ struct Effects {
                 float gain = motor_base_gain;
                 gain *= 1.0f / (1 + atten_near * dist + atten_far * dist * dist);
                 gain *= std::min(1.0f, m.speed * motor_speed_gain_scale + motor_speed_gain_floor);
-                gain *= (d.kind == Drone::Kind::Player) ? player_gain : 1.0f;
+                if (d.kind == Drone::Kind::Player) {
+                    gain *= player_gain;
+                    if (d.tilt) gain *= player_tilt_gain;
+                }
                 float pan = 0.0f;
                 if (dist > 1e-4f) {
                     pan = dot(m.cam_to_motor, cam_right) / dist;
