@@ -791,6 +791,7 @@ MissionResult game_loop(Window& window,
     auto init_state = [&]() {
         state = {};
         state.mission = mission;
+        state.pregame = mission.test_time_limit == 0;  // skip the briefing in timed tests
         state.lives = mission.starting_lives;
         state.terrain.type = mission.terrain_type;
         state.terrain.seed = static_cast<int64>(hash(state.mission.seed, uint64_t{0xf738a04c}));
@@ -811,6 +812,14 @@ MissionResult game_loop(Window& window,
     bool abandoned = false;
     while (window.frame() && !abandoned) {
         const float dt = stopwatch.lap();
+        if (state.pregame) {
+            renderer.draw(window, state, dt);  // mission briefing over the frozen scene
+            audio_engine.update(state);
+            if (window.pressed(Key::enter) || window.pressed(Key::space) ||
+                window.mouse_pressed(1))
+                state.pregame = false;
+            continue;
+        }
         if (state.paused) {
             renderer.draw(window, state, dt);  // frozen scene
             renderer.menu_update_draw(window, pause_shell, settings, /*overlay*/ true);

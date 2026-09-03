@@ -201,6 +201,7 @@ struct MissionResult {
 struct GameState {
     uint64 tick;
     bool paused;
+    bool pregame;  // mission briefing shown until the player continues
     std::vector<Drone> drones;
     Vec<3> camera_pos;
     Quat camera_orientation;

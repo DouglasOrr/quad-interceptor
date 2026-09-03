@@ -1375,6 +1375,29 @@ void main(){
     }
 };
 
+// Word-wrap `text` into lines no wider than `max_chars` characters.
+std::vector<std::string> wrap_lines(const std::string& text, uint max_chars) {
+    std::vector<std::string> lines;
+    for (size_t start = 0; start < text.size();) {
+        size_t end = std::min(start + max_chars, text.size());
+        if (end == text.size()) {
+            lines.push_back(text.substr(start));
+            break;
+        }
+        size_t cut = text.rfind(' ', end);
+        if (cut == std::string::npos || cut <= start) {  // no word break: hard cut
+            lines.push_back(text.substr(start, max_chars));
+            start += max_chars;
+        } else {
+            lines.push_back(text.substr(start, cut - start));
+            start = cut + 1;
+            while (start < text.size() && text[start] == ' ')
+                ++start;
+        }
+    }
+    return lines;
+}
+
 struct HudView {
     GlProgram program;
     Uniform u_radius, u_pitch, u_roll;
@@ -1548,24 +1571,7 @@ void main(){
                 std::max(1u, uint((x_right - x_left) / (font_size[0] * info_scale)));
 
             // Line wrapping
-            std::vector<std::string> lines;
-            for (size_t start = 0; start < s.mission.info.size();) {
-                size_t end = std::min(start + max_chars, s.mission.info.size());
-                if (end == s.mission.info.size()) {
-                    lines.push_back(s.mission.info.substr(start));
-                    break;
-                }
-                size_t cut = s.mission.info.rfind(' ', end);
-                if (cut == std::string::npos || cut <= start) {  // no word break: hard cut
-                    lines.push_back(s.mission.info.substr(start, max_chars));
-                    start += max_chars;
-                } else {
-                    lines.push_back(s.mission.info.substr(start, cut - start));
-                    start = cut + 1;
-                    while (start < s.mission.info.size() && s.mission.info[start] == ' ')
-                        ++start;
-                }
-            }
+            const auto lines = wrap_lines(s.mission.info, max_chars);
             // Render
             const float info_line_h = font_size[1] * info_scale * 1.2f;
             for (size_t i = 0; i < lines.size(); ++i) {
@@ -1722,6 +1728,74 @@ struct FpsView {
         const float x = float(vp[2]) - margin - text_w;
         const float top_y = float(vp[3]) - margin - font_size[1] * scale;
         text.draw(label, x, top_y, scale, {1.0f, 0.4f, 0.4f});
+    }
+};
+
+// Mission briefing, shown before gameplay starts (dismissed with ENTER).
+struct PreGameView {
+    Mesh quad;
+
+    PreGameView() { quad.set_vertices(quad2_centered, sizeof(quad2_centered), 2); }
+
+    void draw(const GameState& s, const FlatShader& flat, TextBatch& text) {
+        GLint vp[4];
+        glGetIntegerv(GL_VIEWPORT, vp);
+
+        // Dim the scene behind the briefing.
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        flat.prog.use();
+        flat.u_use_instancing.set(0);
+        flat.u_mvp.set(mat_diag(1.0f, 1.0f, 1.0f, 1.0f));
+        flat.u_radius.set(0.0f);
+        flat.u_inner.set(0.0f);
+        flat.u_scale.set(2.0f);
+        flat.u_translate.set(Vec<2>{0.0f, 0.0f});
+        flat.u_alpha.set(0.85f);
+        flat.u_color.set(Vec<3>{0.02f, 0.02f, 0.05f});
+        quad.draw();
+        glDisable(GL_BLEND);
+        glEnable(GL_DEPTH_TEST);
+        flat.u_alpha.set(1.0f);
+
+        const auto font_size = text.base_font_size();
+        const float cx = float(vp[2]) / 2.0f;
+        const float cy = float(vp[3]) / 2.0f;
+        constexpr float body_scale = 1.5f;
+        const float line_h = font_size[1] * body_scale;
+        auto centre = [&](const char* str, float y, float scale, const Vec<3>& color) {
+            const float w = float(std::strlen(str)) * font_size[0] * scale;
+            text.draw(str, cx - w / 2.0f, y, scale, color);
+        };
+
+        // Mission name
+        constexpr float title_scale = 3.0f;
+        const float title_w = float(s.mission.name.size()) * font_size[0] * title_scale;
+        text.draw(s.mission.name.c_str(), cx - title_w / 2.0f, cy + 4.5f * line_h, title_scale,
+                  {0.9f, 0.9f, 0.9f});
+
+        // Info, word-wrapped across the centre band.
+        const uint max_chars =
+            std::max(1u, uint((float(vp[2]) * 0.7f) / (font_size[0] * body_scale)));
+        const auto lines = wrap_lines(s.mission.info, max_chars);
+        const float info_line_h = font_size[1] * body_scale * 1.2f;
+        float y = cy + 2.5f * line_h;
+        for (const auto& l : lines) {
+            centre(l.c_str(), y, body_scale, {0.8f, 0.9f, 0.8f});
+            y -= info_line_h;
+        }
+
+        // Map + drone
+        char detail[96];
+        std::snprintf(detail, sizeof(detail), "Map: %s    Drone: %s",
+                      s.terrain.type.kind == TerrainType::Kind::City ? "city" : "plains",
+                      s.mission.player_type.name.c_str());
+        y -= line_h;
+        centre(detail, y, body_scale, {1.0f, 1.0f, 1.0f});
+        y -= 2 * line_h;
+
+        centre("Press ENTER to continue", y, body_scale, {0.7f, 0.7f, 0.7f});
     }
 };
 
@@ -2521,6 +2595,7 @@ struct Renderer::State {
     HudView hud;
     PauseButtonView pause_button;
     NoiseOverlayView overlay;
+    PreGameView pregame;
     PostGameView post_game;
     FpsView fps;
     TextBatch text;
@@ -2562,7 +2637,9 @@ void Renderer::draw(Window& window, GameState& s, float dt) {
     state->minimap.draw(s, state->flat);
     state->hud.draw(s, state->text);
     if (player.status != Drone::Status::Alive) state->overlay.draw(s, state->text);
-    if (s.finish_tick.has_value() && *s.finish_tick <= s.tick) {
+    if (s.pregame) {
+        state->pregame.draw(s, state->flat, state->text);
+    } else if (s.finish_tick.has_value() && *s.finish_tick <= s.tick) {
         state->post_game.draw(s, state->flat, state->text);
     } else {
         state->pause_button.draw(s, window, state->text, state->flat);
