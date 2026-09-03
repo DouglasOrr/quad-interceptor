@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <unordered_map>
 
 #include "game.hpp"
 #include "platform.hpp"
@@ -47,6 +48,50 @@ TEST_CASE("game loop runs for a few frames") {
         mission.test_player_ai = true;
         mission.test_time_limit = 0.25f;
         game_loop(w, renderer, settings, mission);
+    }
+}
+
+TEST_CASE("AI mean time between crashes on city terrain") {
+    constexpr float sim_seconds = 5 * 60.0f;
+    const uint64 tick_limit = uint64(sim_seconds / Physics::dt);
+    for (auto mission : Mission::all()) {
+        if (mission.terrain_type.kind != TerrainType::Kind::City) continue;
+
+        GameState s{};
+        s.mission = mission;
+        s.mission.test_enemy_crashes = true;
+        s.pregame = false;
+        s.lives = mission.starting_lives;
+        s.terrain.type = mission.terrain_type;
+        s.terrain.seed = static_cast<int64>(hash(mission.seed, uint64_t{0xf738a04c}));
+        GameManager game_manager;
+        AI ai;
+        Physics physics;
+        game_manager.update(s);
+
+        // Count player + enemy AI crashes (status transitions into Crashed), across respawns.
+        std::unordered_map<uint, Drone::Status> prev_status;
+        uint64 crash_count = 0;
+        while (s.tick < tick_limit) {
+            ai.update(s);
+            physics.tick(s);
+            for (const auto& d : s.drones) {
+                auto it = prev_status.find(d.id);
+                Drone::Status prev = (it == prev_status.end()) ? Drone::Status::Alive : it->second;
+                if (d.kind == Drone::Kind::Enemy && d.status == Drone::Status::Crashed &&
+                    prev != Drone::Status::Crashed) {
+                    ++crash_count;
+                }
+                prev_status[d.id] = d.status;
+            }
+            game_manager.update(s);
+        }
+
+        const float sim_time = float(s.tick) * Physics::dt;
+        const float mtb = crash_count > 0 ? sim_time / float(crash_count) : sim_time;
+        print("#", mission.name, "( tilt", mission.enemy_tilt, ")");
+        print("  crashes:", crash_count);
+        print("  mean time between crashes:", mtb, "s (", sim_time, "s )");
     }
 }
 

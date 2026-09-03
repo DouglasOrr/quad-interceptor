@@ -320,8 +320,9 @@ void Physics::tick(GameState& state) {
             auto Rt = transpose(R);
             auto ang_vel_m = mul(t.inv_inertia_m, mul(Rt, d.ang_momentum));  // actual rates (model)
 
-            // Collisions (terrain)
-            if (hits_terrain(state.terrain, d.position, t.collision_radius)) {
+            // Collisions (terrain).
+            if ((d.kind != Drone::Kind::Enemy || state.mission.test_enemy_crashes) &&
+                hits_terrain(state.terrain, d.position, t.collision_radius)) {
                 d.status = Drone::Status::Crashed;
                 return;
             }
@@ -423,10 +424,10 @@ constexpr float ai_random_direction_frac = 0.5f;
 
 struct DroneAI {
     uint id;
-    Pid lift = {.target = 1.0f, .lo = 0.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.06f, .kd = 16.67f};
-    Pid yaw = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.06f, .kd = 8.33f};
-    Pid pitch = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 4.17f};
-    Pid roll = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 4.17f};
+    Pid lift = {.target = 1.0f, .lo = 0.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.06f, .kd = 16.0f};
+    Pid yaw = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 8.0f, .ki = 0.06f, .kd = 4.0f};
+    Pid pitch = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 16.0f, .ki = 0.0f, .kd = 2.0f};
+    Pid roll = {.target = 1.0f, .lo = -1.0f, .hi = 1.0f, .kp = 25.0f, .ki = 0.0f, .kd = 8.0f};
     Pid lateral = {.target = 1.0f,
                    .lo = -ai_max_roll_angle,
                    .hi = ai_max_roll_angle,
@@ -500,7 +501,7 @@ Vec<3> choose_city_waypoint(const GameState& s, DroneAI& a, const Vec<3>& pos) {
     }
 
     if (length(node_center(s.terrain.type.city, *a.current) - Vec<2>{pos[0], pos[1]}) <=
-        2.0f * Terrain::cell_size) {
+        Terrain::cell_size) {
         Terrain::Pos old_current = *a.current;
         Terrain::Pos nbrs[4] = {{old_current[0] + 1, old_current[1]},
                                 {old_current[0] - 1, old_current[1]},
@@ -575,9 +576,8 @@ void steer_drone(const GameState& s, DroneAI& a, Drone& d) {
     d.control_m[3] = pid(a.yaw, a.yaw_state, 0.0f, yaw_err);
 
     // Pitch - aim for a target nose-down angle (when facing the waypoint).
-    const float tilt = (d.kind == Drone::Kind::Enemy) ? s.mission.enemy_tilt : 1.0f;
-    float target_pitch =
-        std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) * ai_pitch_angle * tilt;
+    float target_pitch = std::clamp(1 - std::abs(yaw_err) / ai_yaw_deadband, 0.0f, 1.0f) *
+                         ai_pitch_angle * s.mission.enemy_tilt;
     auto pitch = attitude_pitch(d.orientation);
     d.control_m[1] = pid(a.pitch, a.pitch_state, target_pitch, pitch);
 

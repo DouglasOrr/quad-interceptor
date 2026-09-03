@@ -15,6 +15,7 @@ int main(int argc, char** argv) {
     std::optional<DroneType> player_type;
     std::optional<bool> test_player_ai;
     std::optional<float> test_time_limit;
+    std::optional<float> enemy_tilt;
     std::optional<uint64> seed;
     std::optional<WindowMode> window_mode;
     std::optional<bool> vsync;
@@ -69,6 +70,8 @@ int main(int argc, char** argv) {
             }
         } else if (key == "timeout") {
             test_time_limit = std::atof(std::string(value).c_str());
+        } else if (key == "enemy-tilt") {
+            enemy_tilt = std::atof(std::string(value).c_str());
         } else if (key == "profile") {
             if (value == "true") {
                 profile_path = std::string(argv[0]) + ".profile";
@@ -134,6 +137,7 @@ int main(int argc, char** argv) {
         if (player_type) mission.player_type = *player_type;
         if (test_player_ai) mission.test_player_ai = *test_player_ai;
         if (test_time_limit) mission.test_time_limit = *test_time_limit;
+        if (enemy_tilt) mission.enemy_tilt = *enemy_tilt;
         if (seed) mission.seed = *seed;
         Renderer renderer;
         game_loop(window, renderer, settings, mission);

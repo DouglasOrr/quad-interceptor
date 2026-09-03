@@ -186,12 +186,13 @@ std::vector<DroneType> DroneType::all() {
         acro.pid_yaw_rate = rate;
         drones.push_back(acro);
     }
+    drones.push_back(enemy());
 
     return drones;
 }
 
 DroneType DroneType::enemy() {
-    Pid rate = {.target = 2.5f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 3.0f, .kd = 0.0f};
+    Pid rate = {.target = 5.0f, .lo = -1.0f, .hi = 1.0f, .kp = 5.0f, .ki = 5.0f, .kd = 0.0f};
     return {
         .name = "enemy",
         .mass = 1.0f,
@@ -815,8 +816,7 @@ MissionResult game_loop(Window& window,
         if (state.pregame) {
             renderer.draw(window, state, dt);  // mission briefing over the frozen scene
             audio_engine.update(state);
-            if (window.pressed(Key::enter) || window.pressed(Key::space) ||
-                window.mouse_pressed(1))
+            if (window.pressed(Key::enter) || window.pressed(Key::space) || window.mouse_pressed(1))
                 state.pregame = false;
             continue;
         }

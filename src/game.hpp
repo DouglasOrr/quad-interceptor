@@ -187,6 +187,7 @@ struct Mission {
     // Test params
     float test_time_limit = 0;
     bool test_player_ai = false;
+    bool test_enemy_crashes = false;
 
     static std::vector<Mission> all();
 };
