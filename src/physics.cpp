@@ -11,7 +11,7 @@ constexpr Vec<3> up = {0.0f, 0.0f, 1.0f};
 constexpr Vec<3> gravity = {0.0f, 0.0f, -10.0f};
 
 // Drone
-constexpr float explosion_radius = 5.0f;
+constexpr float detonation_radius = 7.5f;
 constexpr float lock_on_rate = 1 / 15.0f;
 constexpr float lock_on_reset_rate = 1 / 30.0f;
 
@@ -343,7 +343,7 @@ void Physics::tick(GameState& state) {
 
             // Collisions (drones: enemy against player)
             if (d.kind == Drone::Kind::Enemy && player.status == Drone::Status::Alive) {
-                if (length(d.position - player.position) < explosion_radius) {
+                if (length(d.position - player.position) < detonation_radius) {
                     d.status = Drone::Status::Detonated;
                     player.status = Drone::Status::Detonated;
                 }
