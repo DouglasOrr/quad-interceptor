@@ -21,6 +21,11 @@ constexpr uint64 tag_y = 0x534b595f59ull;
 constexpr uint64 tag_stilts = 0x5354494c5453ull;
 constexpr uint64 tag_shade = 0x5348414445ull;
 constexpr uint64 tag_wire = 0x57495245ull;
+constexpr uint64 tag_ground = 0x47524e44ull;
+
+// Plains: coarse lattice for the low-frequency ground undulation.
+constexpr uint plains_ground_period = 6;  // cells
+constexpr float plains_ground_amp = 7.0f;
 
 // City: vertical gap between a skywalk slab and the building top below it.
 constexpr float skywalk_clearance = 5.0f;
@@ -99,6 +104,25 @@ bool plains_col_active(const TerrainType::Plains& t, int64 seed, int64 cx) {
     return hash_u(hash(seed, tag_wire, floordiv(cx, period)), 16) < t.pylon_run_prob;
 }
 
+// Ground height at a grid corner: bilinear value noise over the coarse lattice
+// (period cells per lattice cell), sampled at the corner. Pure function of the
+// corner coordinate, so every cell sharing a corner computes the same value.
+float plains_corner_h(const Terrain& terr, int64 cx, int64 cy) {
+    const int64 gx = floordiv(cx, plains_ground_period);
+    const int64 gy = floordiv(cy, plains_ground_period);
+    const float t = float(floormod(cx, plains_ground_period)) / float(plains_ground_period);
+    const float u = float(floormod(cy, plains_ground_period)) / float(plains_ground_period);
+
+    auto v = [&](int64 x, int64 y) {
+        return hash_u(hash(terr.seed, tag_ground, x, y), 0, -plains_ground_amp, plains_ground_amp);
+    };
+    const float w00 = v(gx, gy), w10 = v(gx + 1, gy), w01 = v(gx, gy + 1), w11 = v(gx + 1, gy + 1);
+    const float a = w00 + t * (w10 - w00);
+    const float b = w01 + t * (w11 - w01);
+    auto eps = hash_u(hash(terr.seed, tag_ground, cx, cy), 0);
+    return a + u * (b - a) + 0.5 * eps;
+}
+
 Terrain::Cell sample_plains(const Terrain& terr, Terrain::Pos p) {
     const auto& t = terr.type.plains;
     const int64 stride = int64(t.pylon_stride);
@@ -111,6 +135,12 @@ Terrain::Cell sample_plains(const Terrain& terr, Terrain::Pos p) {
 
     Terrain::Cell cell{};  // value-init: type = Empty
     cell.hash = h;
+    cell.ground = {
+        plains_corner_h(terr, p[0], p[1]),          // [00]
+        plains_corner_h(terr, p[0] + 1, p[1]),      // [10]
+        plains_corner_h(terr, p[0], p[1] + 1),      // [01]
+        plains_corner_h(terr, p[0] + 1, p[1] + 1),  // [11]
+    };
     if (on_row_line || on_col_line) {
         // Pylons on run grid positions; the rest of a run is a cleared corridor.
         if (xrun || yrun) {
@@ -129,6 +159,7 @@ Terrain::Cell sample_plains(const Terrain& terr, Terrain::Pos p) {
     }
     return cell;
 }
+
 Terrain::Cell sample_city(const Terrain& terr, Terrain::Pos p) {
     uint64 h = hash(terr.seed, p[0], p[1]);
     const auto& ct = terr.type.city;
@@ -205,6 +236,12 @@ Terrain::Cell sample_city(const Terrain& terr, Terrain::Pos p) {
     }
     return cell;
 }
+
+// Fractional offset of v within its cell, matching nearest_cell(v).
+Vec<2> cell_frac(Terrain::Pos p, Vec<2> v) {
+    const float cs = Terrain::cell_size;
+    return {v[0] / cs - float(p[0]), v[1] / cs - float(p[1])};
+}
 }  // namespace
 
 Vec<2> TerrainType::City::snap_intersection(Vec<2> v) const {
@@ -219,8 +256,15 @@ Terrain::Cell Terrain::operator()(Pos p) const {
             return sample_city(*this, p);
         default:
             gassert(false && "unexpected TerrainType");
-            return {.type = Terrain::CellType::Empty, .hash = 0, .empty = {}};
+            return {.type = Terrain::CellType::Empty, .hash = 0, .ground = {}, .empty = {}};
     }
+}
+
+float Terrain::ground_height(const Cell& cell, Vec<2> frac) {
+    const auto& g = cell.ground;
+    const float a = g[0] + frac[0] * (g[1] - g[0]);  // row y=0
+    const float b = g[2] + frac[0] * (g[3] - g[2]);  // row y=1
+    return a + frac[1] * (b - a);
 }
 
 namespace {
@@ -267,7 +311,8 @@ bool hits_terrain(const Terrain& terr, Vec<3> p, float r) {
                 }
                 case Terrain::CellType::Pole: {
                     const auto& pl = c.pole;
-                    if (intersect_capsule_sphere({pc[0], pc[1], 0.0f}, {pc[0], pc[1], pl.top},
+                    const float g = terr.ground_height(c, {0.5f, 0.5f});
+                    if (intersect_capsule_sphere({pc[0], pc[1], g}, {pc[0], pc[1], g + pl.top},
                                                  pl.radius, p, r))
                         return true;
                     break;
@@ -350,8 +395,12 @@ void Physics::tick(GameState& state) {
             }
 
             // Collisions (floor)
-            if (d.position[2] - t.height <= 0.0f) {
-                d.position[2] = t.height;
+            const Vec<2> ground_xy{d.position[0], d.position[1]};
+            const Terrain::Pos ground_cell = Terrain::nearest_cell(ground_xy);
+            const float ground = Terrain::ground_height(state.terrain(ground_cell),
+                                                        cell_frac(ground_cell, ground_xy));
+            if (d.position[2] - t.height <= ground) {
+                d.position[2] = ground + t.height;
                 constexpr auto floor_drag = 8.0f;
                 d.velocity[0] -= (dt * floor_drag) * sign(d.velocity[0]);
                 d.velocity[1] -= (dt * floor_drag) * sign(d.velocity[1]);
@@ -462,12 +511,15 @@ float choose_safe_altitude(const Terrain& terr, const Vec<3>& pos, Vec<2> target
     Vec<2> dir = dist > 1e-3f ? normalise(to_tgt) : Vec<2>{0.0f, 0.0f};
     for (int i = 0; i <= n_lookahead; ++i) {
         float step = std::min(float(i) * Terrain::cell_size, dist);
-        auto c = terr(Terrain::nearest_cell(cur2 + step * dir));
+        Vec<2> at = cur2 + step * dir;
+        auto at_cell = Terrain::nearest_cell(at);
+        auto c = terr(at_cell);
         if (c.type == Terrain::CellType::Skywalk) {
             ranges.push_back({c.skywalk.bottom - margin,
                               c.skywalk.bottom + TerrainType::City::skywalk_thickness + margin});
         } else if (c.type == Terrain::CellType::Pole) {
-            ranges.push_back({0.0f, c.pole.top + margin});
+            float g = Terrain::ground_height(c, cell_frac(at_cell, at));
+            ranges.push_back({g, g + c.pole.top + margin});
         }
     }
     std::ranges::sort(ranges, [](const auto& a, const auto& b) { return a.lo < b.lo; });

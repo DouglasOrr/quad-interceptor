@@ -250,10 +250,16 @@ struct Instance3D {
     Vec<3> color;
 };
 
+struct CornerInst {
+    Vec<4> h;
+    Vec<4> c;
+};
+
 struct Mesh {
     GlVertexArray vao;
     GlBuffer vbo;
     GlBuffer instance_vbo;
+    GlBuffer corners_vbo;
     GLsizei vertex_count = 0;
     GLsizei instance_count = 0;
     GLenum mode = GL_TRIANGLES;
@@ -297,6 +303,28 @@ struct Mesh {
         instance_count = static_cast<GLsizei>(instances.size());
         if (instance_count > 0) {
             instance_vbo.upload(instances, GL_DYNAMIC_DRAW);
+        }
+    }
+
+    // Optional per-instance corner heights/colours (attributes 4-5), bound only
+    // where wanted; without them the attributes read as zero and do nothing.
+    void setup_instances_corners() {
+        glBindVertexArray(vao.id);
+        glBindBuffer(GL_ARRAY_BUFFER, corners_vbo.id);
+        constexpr GLsizei stride = sizeof(CornerInst);
+        glVertexAttribPointer(4, 4, GL_FLOAT, GL_FALSE, stride, (void*)0);
+        glEnableVertexAttribArray(4);
+        glVertexAttribDivisor(4, 1);
+        glVertexAttribPointer(5, 4, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(CornerInst, c));
+        glEnableVertexAttribArray(5);
+        glVertexAttribDivisor(5, 1);
+        glBindVertexArray(0);
+    }
+
+    void upload_corners(const std::vector<CornerInst>& corners) {
+        gassert(instance_count == GLsizei(corners.size()));
+        if (instance_count > 0) {
+            corners_vbo.upload(corners, GL_DYNAMIC_DRAW);
         }
     }
 
@@ -344,6 +372,7 @@ struct PhongShader {
 
     // Uniforms
     Uniform u_inst_mvp, u_inst_light_dir, u_inst_cam_pos, u_inst_fog_color, u_inst_fog_range;
+    Uniform u_inst_hills;
     Uniform u_model_mvp, u_model_mat, u_model_color, u_model_light_dir, u_model_cam_pos,
         u_model_fog_color, u_model_fog_range;
 
@@ -384,14 +413,20 @@ layout(location=0) in vec3 pos;
 layout(location=1) in vec3 inst_pos;
 layout(location=2) in vec3 inst_scale;
 layout(location=3) in vec3 inst_color;
+layout(location=4) in vec4 inst_corner_h;
+layout(location=5) in vec4 inst_corner_c;
 uniform mat4 u_mvp;
+uniform float u_hills;
 out vec3 v_world;
 out vec3 v_color;
 void main(){
   vec3 p = inst_pos + inst_scale * (pos + 0.5);
+  vec2 a = pos.xy + 0.5;
+  vec4 f = vec4((1.0 - a.x) * (1.0 - a.y), a.x * (1.0 - a.y), a.x * a.y, (1.0 - a.x) * a.y);
+  p.z += u_hills * dot(f, inst_corner_h);
   gl_Position = u_mvp * vec4(p, 1.0);
   v_world = p;
-  v_color = inst_color;
+  v_color = mix(inst_color, dot(f, inst_corner_c) * inst_color, u_hills);
 }
 )";
         const char* model_v_src = R"(
@@ -414,6 +449,7 @@ void main(){
         u_inst_cam_pos = inst_prog.uniform("u_cam_pos");
         u_inst_fog_color = inst_prog.uniform("u_fog_color");
         u_inst_fog_range = inst_prog.uniform("u_fog_range");
+        u_inst_hills = inst_prog.uniform("u_hills");
 
         model_prog = GlProgram(model_v_src, phong_f_src);
         u_model_mvp = model_prog.uniform("u_mvp");
@@ -429,13 +465,15 @@ void main(){
                              const Vec<3>& light_dir,
                              const Vec<3>& eye,
                              const Vec<3>& fog_color,
-                             Vec<2> fog_range) const {
+                             Vec<2> fog_range,
+                             float hills) const {
         inst_prog.use();
         u_inst_mvp.set(mvp);
         u_inst_light_dir.set(light_dir);
         u_inst_cam_pos.set(eye);
         u_inst_fog_color.set(fog_color);
         u_inst_fog_range.set(fog_range);
+        u_inst_hills.set(hills);
     }
 
     void set_scene_model(const Vec<3>& light_dir,
@@ -519,6 +557,7 @@ constexpr float fog_end = float(view_radius) * Terrain::cell_size;
 constexpr float fog_start = fog_end * 0.5f;
 constexpr Vec<3> city_floor_color{0.15f, 0.15f, 0.15f};
 constexpr Vec<3> plains_floor_color{0.10f, 0.16f, 0.08f};
+constexpr uint64 tag_tint = 0x54494e54ull;
 constexpr int minimap_cells = 25;
 constexpr float minimap_size_ratio = 0.25f;
 constexpr float attitude_size_ratio = 0.15f;
@@ -609,8 +648,8 @@ void main(){
         if (b.type != Terrain::CellType::Pole || !on_run(b.pole)) return;
         auto cc = Terrain::cell_center(cur);
         auto cp = Terrain::cell_center(prev);
-        Vec<3> A{cp[0], cp[1], b.pole.top - 2.0f};
-        Vec<3> B{cc[0], cc[1], a.pole.top - 2.0f};
+        Vec<3> A{cp[0], cp[1], Terrain::ground_height(b, {0.5f, 0.5f}) + b.pole.top - 2.0f};
+        Vec<3> B{cc[0], cc[1], Terrain::ground_height(a, {0.5f, 0.5f}) + a.pole.top - 2.0f};
         if (length(B - A) < 1.0f) return;
         Vec<2> perp = along_x ? Vec<2>{0.0f, 1.0f} : Vec<2>{1.0f, 0.0f};
         for (float w : {-0.9f, 0.0f, 0.9f}) {
@@ -824,6 +863,7 @@ struct TerrainView {
     TerrainView(const PhongShader& phong) {
         floor.set_vertices(quad3_centered, sizeof(quad3_centered));
         floor.setup_instances_3d();
+        floor.setup_instances_corners();
 
         auto cube_verts = make_cube();
         buildings.set_vertices(cube_verts);
@@ -844,6 +884,7 @@ struct TerrainView {
         const Terrain& terr = s.terrain;
         const TerrainType& tt = terr.type;
         const float cell = Terrain::cell_size;
+        const bool plains = tt.kind == TerrainType::Kind::Plains;
         const Drone& player = player_drone(s);
         const int64 ax = static_cast<int64>(std::floor(player.position[0] / cell));
         const int64 ay = static_cast<int64>(std::floor(player.position[1] / cell));
@@ -853,6 +894,7 @@ struct TerrainView {
             anchor_y = ay;
 
             std::vector<Instance3D> floor_inst;
+            std::vector<CornerInst> floor_corners;
             std::vector<Instance3D> building_inst;
             std::vector<Instance3D> pillar_inst;
             wires.ends_a.clear();
@@ -860,9 +902,27 @@ struct TerrainView {
 
             for (int64 dy = -view_radius; dy <= view_radius; ++dy) {
                 for (int64 dx = -view_radius; dx <= view_radius; ++dx) {
-                    auto c = terr({ax + dx, ay + dy});
-                    float wx = float(ax + dx) * cell;
-                    float wy = float(ay + dy) * cell;
+                    auto cx = ax + dx, cy = ay + dy;
+                    float wx = float(cx) * cell, wy = float(cy) * cell;
+                    auto c = terr({cx, cy});
+
+                    if (c.type != Terrain::CellType::Building) {  // has a floor
+                        const Vec<3>& g = plains ? plains_floor_color : city_floor_color;
+                        CornerInst corners;
+                        if (plains) {
+                            corners.h = {c.ground[0], c.ground[1], c.ground[3], c.ground[2]};
+                            auto tint = [&](int64 x, int64 y) {
+                                return hash_u(hash(terr.seed, tag_tint, x, y), 0, 0.72f, 1.05f);
+                            };
+                            corners.c = {tint(cx, cy), tint(cx + 1, cy), tint(cx + 1, cy + 1),
+                                         tint(cx, cy + 1)};
+                        } else {
+                            corners.h = {0.0f, 0.0f, 0.0f, 0.0f};
+                            corners.c = {1.0f, 1.0f, 1.0f, 1.0f};
+                        }
+                        floor_inst.push_back({{wx, wy, 0.0f}, {cell, cell, 0.0f}, g});
+                        floor_corners.push_back(corners);
+                    }
 
                     switch (c.type) {
                         case Terrain::CellType::Building: {
@@ -884,10 +944,6 @@ struct TerrainView {
                             break;
                         }
                         case Terrain::CellType::Skywalk: {
-                            const Vec<3>& g = tt.kind == TerrainType::Kind::Plains
-                                                  ? plains_floor_color
-                                                  : city_floor_color;
-                            floor_inst.push_back({{wx, wy, 0.0f}, {cell, cell, 0.0f}, g});
                             float shade = hash_u(c.hash, 32, 0.25f, 0.45f);
                             const float T = TerrainType::City::skywalk_thickness;
                             float sx = c.skywalk.axis_x ? cell : T;
@@ -900,21 +956,18 @@ struct TerrainView {
                             break;
                         }
                         case Terrain::CellType::Pole: {
-                            const Vec<3>& g = tt.kind == TerrainType::Kind::Plains
-                                                  ? plains_floor_color
-                                                  : city_floor_color;
-                            floor_inst.push_back({{wx, wy, 0.0f}, {cell, cell, 0.0f}, g});
                             const float r = c.pole.radius;
                             Vec<3> pole_col = (c.pole.pylon_x || c.pole.pylon_y)
                                                   ? Vec<3>{0.32f, 0.34f, 0.40f}
                                                   : Vec<3>{0.48f, 0.42f, 0.34f};
+                            const float base =
+                                0.25f * (c.ground[0] + c.ground[1] + c.ground[2] + c.ground[3]);
                             pillar_inst.push_back(
-                                {{wx + 0.5f * cell - r, wy + 0.5f * cell - r, 0.0f},
+                                {{wx + 0.5f * cell - r, wy + 0.5f * cell - r, base},
                                  {2.0f * r, 2.0f * r, c.pole.top},
                                  pole_col});
 
-                            if (tt.kind == TerrainType::Kind::Plains &&
-                                (c.pole.pylon_x || c.pole.pylon_y)) {
+                            if (plains && (c.pole.pylon_x || c.pole.pylon_y)) {
                                 Terrain::Pos here = {ax + dx, ay + dy};
                                 const int64 stride = int64(tt.plains.pylon_stride);
                                 if (c.pole.pylon_x)
@@ -924,29 +977,27 @@ struct TerrainView {
                             }
                             break;
                         }
-                        case Terrain::CellType::Empty: {
-                            const Vec<3>& g = tt.kind == TerrainType::Kind::Plains
-                                                  ? plains_floor_color
-                                                  : city_floor_color;
-                            floor_inst.push_back({{wx, wy, 0.0f}, {cell, cell, 0.0f}, g});
+                        case Terrain::CellType::Empty:
                             break;
-                        }
                     }
                 }
             }
             floor.upload_instances(floor_inst);
+            floor.upload_corners(floor_corners);
             buildings.upload_instances(building_inst);
             pillars.upload_instances(pillar_inst);
             wires.upload();
         }
 
         phong.set_scene_instanced(view_projection_mat, light_dir, eye, fog_color,
-                                  Vec<2>{fog_start, fog_end});
+                                  Vec<2>{fog_start, fog_end}, /*hills*/ 1.0f);
 
         if (floor.instance_count > 0) {
             floor_mat.use();
             floor.draw();
         }
+        phong.set_scene_instanced(view_projection_mat, light_dir, eye, fog_color,
+                                  Vec<2>{fog_start, fog_end}, /*hills*/ 0.0f);
         if (buildings.instance_count > 0) {
             building_mat.use();
             buildings.draw();

@@ -145,6 +145,7 @@ struct Terrain {
     struct Cell {
         CellType type;
         uint64 hash;
+        std::array<float, 4> ground;  // corners xy=[00, 10, 01, 11]
         union {
             struct {
             } empty;
@@ -163,6 +164,7 @@ struct Terrain {
     inline static constexpr float cell_size = 15.0f;
     static Pos nearest_cell(Vec<2> v);
     static Vec<2> cell_center(Pos p);
+    static float ground_height(const Cell& cell, Vec<2> frac);
 };
 
 struct Mission {

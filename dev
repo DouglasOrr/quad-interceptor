@@ -364,7 +364,7 @@ def benchmark(variant: str, timeout: float, vsync: bool) -> None:
         program_args=(
             "game",
             "player=ai",
-            "mission=sandbox",
+            "mission=City Sandbox",
             f"timeout={timeout}",
             "profile=true",
             f"vsync={'true' if vsync else 'false'}",
