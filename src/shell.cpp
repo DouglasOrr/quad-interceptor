@@ -145,7 +145,7 @@ std::string get_config_dir() {
 
 Settings Settings::defaults() {
     Settings s;
-    s.fullscreen = false;
+    s.fullscreen = true;
     s.msaa = 1;
     s.vsync = true;
     s.window_width = 1920;
