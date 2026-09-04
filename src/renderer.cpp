@@ -255,6 +255,11 @@ struct CornerInst {
     Vec<4> c;
 };
 
+struct WindowInst {
+    Vec<3> pos;
+    Vec<2> tangent;
+};
+
 struct Mesh {
     GlVertexArray vao;
     GlBuffer vbo;
@@ -328,6 +333,27 @@ struct Mesh {
         }
     }
 
+    void setup_instances_windows() {
+        glBindVertexArray(vao.id);
+        glBindBuffer(GL_ARRAY_BUFFER, instance_vbo.id);
+        constexpr GLsizei stride = sizeof(WindowInst);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)offsetof(WindowInst, pos));
+        glEnableVertexAttribArray(1);
+        glVertexAttribDivisor(1, 1);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride,
+                              (void*)offsetof(WindowInst, tangent));
+        glEnableVertexAttribArray(2);
+        glVertexAttribDivisor(2, 1);
+        glBindVertexArray(0);
+    }
+
+    void upload_window_instances(const std::vector<WindowInst>& inst) {
+        instance_count = static_cast<GLsizei>(inst.size());
+        if (instance_count > 0) {
+            instance_vbo.upload(inst, GL_DYNAMIC_DRAW);
+        }
+    }
+
     void draw() const {
         if (vertex_count <= 0) return;
         glBindVertexArray(vao.id);
@@ -366,20 +392,9 @@ struct PhongMaterial {
 ////////////////////////////////////////////////////////////////////////////////
 // Shaders
 
-struct PhongShader {
-    GlProgram inst_prog;
-    GlProgram model_prog;
-
-    // Uniforms
-    Uniform u_inst_mvp, u_inst_light_dir, u_inst_cam_pos, u_inst_fog_color, u_inst_fog_range;
-    Uniform u_inst_hills;
-    Uniform u_model_mvp, u_model_mat, u_model_color, u_model_light_dir, u_model_cam_pos,
-        u_model_fog_color, u_model_fog_range;
-
-    PhongShader() { init(); }
-
-    void init() {
-        const char* phong_f_src = R"(
+// Phong lighting fragment shader, shared by the instanced and model programs
+// and reused for instanced windows (see WindowView).
+const char* phong_f_src = R"(
 #version 330 core
 in vec3 v_world;
 in vec3 v_color;
@@ -407,6 +422,23 @@ void main(){
 }
 )";
 
+struct PhongShader {
+    GlProgram inst_prog;
+    GlProgram model_prog;
+
+    // Uniforms
+    Uniform u_inst_mvp, u_inst_light_dir, u_inst_cam_pos, u_inst_fog_color, u_inst_fog_range;
+    Uniform u_inst_hills;
+    Uniform u_model_mvp, u_model_mat, u_model_color, u_model_light_dir, u_model_cam_pos,
+        u_model_fog_color, u_model_fog_range;
+
+    PhongShader() { init(); }
+
+    // Build a Phong-lit program from a custom vertex shader, reusing the shared
+    // fragment so callers get the same lighting for their own geometry.
+    GlProgram phong_program(const char* v_src) const { return GlProgram(v_src, phong_f_src); }
+
+    void init() {
         const char* inst_v_src = R"(
 #version 330 core
 layout(location=0) in vec3 pos;
@@ -558,6 +590,13 @@ constexpr float fog_start = fog_end * 0.5f;
 constexpr Vec<3> city_floor_color{0.15f, 0.15f, 0.15f};
 constexpr Vec<3> plains_floor_color{0.10f, 0.16f, 0.08f};
 constexpr uint64 tag_tint = 0x54494e54ull;
+
+constexpr uint window_view_radius = 25;
+constexpr uint64 tag_win = 0x06227085ull;
+constexpr float window_margin = 3.0f;
+constexpr int window_cols = 2;
+constexpr float window_row_h = 8.0f;
+
 constexpr int minimap_cells = 25;
 constexpr float minimap_size_ratio = 0.25f;
 constexpr float attitude_size_ratio = 0.15f;
@@ -842,11 +881,127 @@ void main() {
     }
 };
 
+struct WindowView {
+    GlProgram program;
+    Uniform u_mvp, u_light_dir, u_cam_pos, u_fog_color, u_fog_range, u_win_size;
+    Mesh dark, lit;
+    PhongMaterial dark_mat{.ambient = grey(0.03),
+                           .diffuse = Vec<3>{0.02f, 0.03f, 0.05f},
+                           .specular = grey(1.0),
+                           .shininess = 80};
+    PhongMaterial lit_mat{.ambient = Vec<3>{0.9f, 0.7f, 0.45f},
+                          .diffuse = Vec<3>{0.1f, 0.2f, 0.1f},
+                          .specular = grey(0.6),
+                          .shininess = 80};
+    std::vector<WindowInst> dark_inst, lit_inst;
+
+    WindowView(const PhongShader& phong) {
+        const char* v_src = R"(
+#version 330 core
+layout(location=0) in vec3 pos;
+layout(location=1) in vec3 inst_pos;
+layout(location=2) in vec2 inst_tangent;
+uniform mat4 u_mvp;
+uniform vec2 u_win_size;
+out vec3 v_world;
+out vec3 v_color;
+void main(){
+  vec3 p = inst_pos + vec3(inst_tangent * (pos.x * u_win_size.x), pos.y * u_win_size.y);
+  gl_Position = u_mvp * vec4(p, 1.0);
+  v_world = p;
+  v_color = vec3(1.0);
+}
+)";
+        program = phong.phong_program(v_src);
+        u_mvp = program.uniform("u_mvp");
+        u_light_dir = program.uniform("u_light_dir");
+        u_cam_pos = program.uniform("u_cam_pos");
+        u_fog_color = program.uniform("u_fog_color");
+        u_fog_range = program.uniform("u_fog_range");
+        u_win_size = program.uniform("u_win_size");
+
+        dark.set_vertices(quad3_centered, sizeof(quad3_centered));
+        dark.setup_instances_windows();
+        lit.set_vertices(quad3_centered, sizeof(quad3_centered));
+        lit.setup_instances_windows();
+
+        dark_mat.init(program);
+        lit_mat.init(program);
+    }
+
+    void clear() {
+        dark_inst.clear();
+        lit_inst.clear();
+    }
+
+    void emit(const Terrain& terr, int64 cx, int64 cy, float wx, float wy, float base, float top) {
+        const float cell = Terrain::cell_size;
+        const float win_h = window_row_h - window_margin;
+        if (top - base < win_h + 2.0f * window_margin) return;
+
+        const uint64 hb = hash(terr.seed, tag_win, cx, cy);
+        const float lit_rate = hash_u(hb, 0) * hash_u(hb, 0);
+        const float span = cell - 2.0f * window_margin;
+        const float win_w = (span - float(window_cols - 1) * window_margin) / float(window_cols);
+        const float half_w = 0.5f * win_w, half_h = 0.5f * win_h;
+        uint idx = 0;
+
+        auto face = [&](float plane, bool along_x, float sign) {
+            const Vec<2> tangent = along_x ? Vec<2>{0.0f, 1.0f} : Vec<2>{1.0f, 0.0f};
+            for (int i = 0; i < window_cols; ++i) {
+                const float cu = window_margin + float(i) * (win_w + window_margin) + half_w;
+                for (int r = 0;; ++r) {
+                    const float zc = base + window_margin + (float(r) + 0.5f) * window_row_h;
+                    if (zc + half_h > top - window_margin) break;
+                    const float along = along_x ? wy + cu : wx + cu;
+                    const float normal = plane + sign * 0.2f;
+                    Vec<3> center = along_x ? Vec<3>{normal, along, zc} : Vec<3>{along, normal, zc};
+                    const uint64 h = hash(terr.seed, tag_win, cx, cy, idx++);
+                    auto& out = hash_u(h, 16) < lit_rate ? lit_inst : dark_inst;
+                    out.push_back({center, tangent});
+                }
+            }
+        };
+        face(wx, true, -1.0f);
+        face(wx + cell, true, +1.0f);
+        face(wy, false, -1.0f);
+        face(wy + cell, false, +1.0f);
+    }
+
+    void upload() {
+        dark.upload_window_instances(dark_inst);
+        lit.upload_window_instances(lit_inst);
+    }
+
+    void draw(const Mat4& view_projection_mat, const Vec<3>& eye) const {
+        if (dark.instance_count <= 0 && lit.instance_count <= 0) return;
+        program.use();
+        u_mvp.set(view_projection_mat);
+        u_light_dir.set(light_dir);
+        u_cam_pos.set(eye);
+        u_fog_color.set(fog_color);
+        u_fog_range.set(Vec<2>{fog_start, fog_end});
+        u_win_size.set(Vec<2>{
+            (Terrain::cell_size - 2.0f * window_margin - float(window_cols - 1) * window_margin) /
+                float(window_cols),
+            window_row_h - window_margin});
+        if (dark.instance_count > 0) {
+            dark_mat.use();
+            dark.draw();
+        }
+        if (lit.instance_count > 0) {
+            lit_mat.use();
+            lit.draw();
+        }
+    }
+};
+
 struct TerrainView {
     Mesh floor;
     Mesh buildings;
     Mesh pillars;
     WiresView wires;
+    WindowView windows;
 
     PhongMaterial floor_mat{.ambient = grey(0.1),
                             .diffuse = grey(0.9),
@@ -854,13 +1009,13 @@ struct TerrainView {
                             .shininess = 5};
     PhongMaterial building_mat{.ambient = grey(0.2),
                                .diffuse = grey(0.7),
-                               .specular = grey(0.5),
-                               .shininess = 50};
+                               .specular = grey(0.2),
+                               .shininess = 20};
 
     int64 anchor_x = INT64_MAX;
     int64 anchor_y = INT64_MAX;
 
-    TerrainView(const PhongShader& phong) {
+    TerrainView(const PhongShader& phong) : windows(phong) {
         floor.set_vertices(quad3_centered, sizeof(quad3_centered));
         floor.setup_instances_3d();
         floor.setup_instances_corners();
@@ -899,6 +1054,7 @@ struct TerrainView {
             std::vector<Instance3D> pillar_inst;
             wires.ends_a.clear();
             wires.ends_b.clear();
+            windows.clear();
 
             for (int64 dy = -view_radius; dy <= view_radius; ++dy) {
                 for (int64 dx = -view_radius; dx <= view_radius; ++dx) {
@@ -940,6 +1096,11 @@ struct TerrainView {
                                     {{wx + 0.5f * cell - pr, wy + 0.5f * cell - pr, b.podium},
                                      {2.0f * pr, 2.0f * pr, b.base - b.podium},
                                      {0.35f, 0.35f, 0.4f}});
+                            }
+                            if (uint(std::max(std::abs(dx), std::abs(dy))) <= window_view_radius) {
+                                windows.emit(terr, cx, cy, wx, wy, b.base, b.top);
+                                if (b.podium > 0.0f)
+                                    windows.emit(terr, cx, cy, wx, wy, 0.0f, b.podium);
                             }
                             break;
                         }
@@ -986,6 +1147,7 @@ struct TerrainView {
             floor.upload_corners(floor_corners);
             buildings.upload_instances(building_inst);
             pillars.upload_instances(pillar_inst);
+            windows.upload();
             wires.upload();
         }
 
@@ -1006,6 +1168,7 @@ struct TerrainView {
             building_mat.use();
             pillars.draw();
         }
+        windows.draw(view_projection_mat, eye);
         wires.draw(view_projection_mat, eye);
     }
 };
