@@ -2304,6 +2304,7 @@ struct Menus {
                 view.items.push_back(
                     choice_item("MSAA", {{"1x", 1}, {"2x", 2}, {"4x", 4}, {"8x", 8}}, msaa_index));
                 view.items.push_back(toggle_item("VSync", settings.vsync));
+                view.items.push_back(toggle_item("Show FPS", settings.show_fps));
                 view.items.push_back(spacer_item());
                 view.items.push_back(plain_item("Back"));
                 break;
@@ -2376,6 +2377,8 @@ struct Menus {
                 } else if (cursor == 3) {
                     settings.vsync = item.on;
                     window.set_vsync(item.on);
+                } else if (cursor == 4) {
+                    settings.show_fps = item.on;
                 }
                 break;
             case ShellState::Screen::Sound:
@@ -2843,7 +2846,7 @@ Renderer::Renderer() : state(std::make_unique<State>()) {
 
 Renderer::~Renderer() = default;
 
-void Renderer::draw(Window& window, GameState& s, float dt) {
+void Renderer::draw(Window& window, GameState& s, const Settings& settings, float dt) {
     glClearColor(fog_color[0], fog_color[1], fog_color[2], 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     if (s.drones.empty()) return;
@@ -2868,7 +2871,7 @@ void Renderer::draw(Window& window, GameState& s, float dt) {
     } else {
         state->pause_button.draw(s, window, state->text, state->flat);
     }
-    state->fps.draw(dt, state->text);
+    if (settings.show_fps) state->fps.draw(dt, state->text);
 }
 
 void Renderer::menu_update_draw(Window& window,

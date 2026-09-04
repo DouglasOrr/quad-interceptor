@@ -148,6 +148,7 @@ Settings Settings::defaults() {
     s.fullscreen = true;
     s.msaa = 1;
     s.vsync = true;
+    s.show_fps = false;
     s.window_width = 1920;
     s.window_height = 1080;
     s.master_volume = 1.0f;
@@ -227,6 +228,8 @@ Settings::LoadResult Settings::load(const std::string& dir) {
             if (!failed && n >= 1) msaa = uint(n);
         } else if (key == "vsync") {
             parse_bool(value, vsync, failed, settings_file);
+        } else if (key == "show_fps") {
+            parse_bool(value, show_fps, failed, settings_file);
         } else if (key == "window_width") {
             int n = 0;
             parse_int(value, n, failed, settings_file);
@@ -266,6 +269,7 @@ void Settings::save(const std::string& dir) const {
     out << "fullscreen=" << (fullscreen ? "true" : "false") << '\n';
     out << "msaa=" << msaa << '\n';
     out << "vsync=" << (vsync ? "true" : "false") << '\n';
+    out << "show_fps=" << (show_fps ? "true" : "false") << '\n';
     out << "window_width=" << window_width << '\n';
     out << "window_height=" << window_height << '\n';
     out << "master_volume=" << fmt_float(master_volume) << '\n';

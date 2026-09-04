@@ -247,6 +247,7 @@ struct Settings {
     bool fullscreen;
     uint msaa;
     bool vsync;
+    bool show_fps;
     int window_width;
     int window_height;
     float master_volume;
@@ -353,7 +354,7 @@ struct Renderer {
     Renderer();
     ~Renderer();
 
-    void draw(Window&, GameState&, float dt);
+    void draw(Window&, GameState&, const Settings&, float dt);
     void menu_update_draw(Window&, ShellState&, Settings&, bool overlay);
 
 private:

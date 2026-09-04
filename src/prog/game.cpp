@@ -19,6 +19,7 @@ int main(int argc, char** argv) {
     std::optional<uint64> seed;
     std::optional<WindowMode> window_mode;
     std::optional<bool> vsync;
+    std::optional<bool> show_fps;
     std::optional<uint> msaa;
     std::string profile_path;
     std::optional<std::string> config_dir_;
@@ -92,6 +93,15 @@ int main(int argc, char** argv) {
             }
         } else if (key == "msaa") {
             msaa = static_cast<uint>(std::atoi(std::string(value).c_str()));
+        } else if (key == "show-fps") {
+            if (value == "true") {
+                show_fps = true;
+            } else if (value == "false") {
+                show_fps = false;
+            } else {
+                std::cerr << "Error! Unknown show-fps=" << value << std::endl;
+                return 1;
+            }
         } else if (key == "seed") {
             seed = static_cast<uint64>(std::strtoull(std::string(value).c_str(), nullptr, 0));
         } else if (key == "config-dir") {
@@ -118,6 +128,7 @@ int main(int argc, char** argv) {
     auto settings_load = settings.load(get_config_dir());
     if (window_mode) settings.fullscreen = *window_mode == WindowMode::Fullscreen;
     if (vsync) settings.vsync = *vsync;
+    if (show_fps) settings.show_fps = *show_fps;
     if (msaa) settings.msaa = *msaa;
     if (settings_load == Settings::LoadResult::NoFile) {  // create on first run
         settings.save(get_config_dir());

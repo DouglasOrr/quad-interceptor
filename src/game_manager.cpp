@@ -744,14 +744,14 @@ MissionResult game_loop(Window& window,
     while (window.frame() && !abandoned) {
         const float dt = stopwatch.lap();
         if (state.pregame) {
-            renderer.draw(window, state, dt);  // mission briefing over the frozen scene
+            renderer.draw(window, state, settings, dt);  // mission briefing over the frozen scene
             audio_engine.update(state);
             if (window.pressed(Key::enter) || window.pressed(Key::space) || window.mouse_pressed(1))
                 state.pregame = false;
             continue;
         }
         if (state.paused) {
-            renderer.draw(window, state, dt);  // frozen scene
+            renderer.draw(window, state, settings, dt);  // frozen scene
             renderer.menu_update_draw(window, pause_shell, settings, /*overlay*/ true);
             audio_engine.update(state);
             switch (pause_shell.navigation) {
@@ -787,7 +787,7 @@ MissionResult game_loop(Window& window,
             physics_time -= Physics::dt;
         }
         game_manager.update(state);
-        renderer.draw(window, state, dt);
+        renderer.draw(window, state, settings, dt);
         audio_engine.update(state);
         auto finished = state.finish_tick.has_value() && *state.finish_tick <= state.tick;
         if ((window.pressed(Key::esc) || state.paused) && !finished) {  // pause menu
