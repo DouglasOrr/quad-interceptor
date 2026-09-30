@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#     "pillow==11.1.0",
+#     "pillow==12.3.0",
 # ]
 # ///
 """Render an ASCII font into a serialized C++ source file.
